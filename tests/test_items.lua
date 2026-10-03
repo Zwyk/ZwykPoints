@@ -276,4 +276,95 @@ equal(secretReport.items[1].raw.ITEM_MOD_STRENGTH_SHORT, "[secret value unavaila
 equal(secretReport.items[1].raw["[secret key unavailable]"], 8)
 issecretvalue = nil
 
+-- Regression cases taken from the six-item Forever 1.60.1 issue export.
+local foreverCases = {
+    { id = 15493, name = "Bloodspattered Loincloth of the Knight", equipLoc = "INVTYPE_LEGS",
+        raw = { ITEM_MOD_SPELL_POWER_SHORT = 2, ITEM_MOD_STAMINA_SHORT = 4, ITEM_MOD_STRENGTH_SHORT = 2, RESISTANCE0_NAME = 141 },
+        lines = { "141 Armor", "+2 Strength", "+4 Stamina",
+            "Equip: Increases damage and healing done by magical spells and effects by up to 2.",
+            "Enchanted: Stamina +2 and Armor +16" },
+        expected = { armor = 157, strength = 2, stamina = 6, spellDamage = 2, healing = 2 } },
+    { id = 15509, name = "Grunt's Handwraps of Magic", equipLoc = "INVTYPE_HAND",
+        raw = { ITEM_MOD_SPELL_POWER_SHORT = 6, RESISTANCE0_NAME = 107 },
+        lines = { "107 Armor", "Equip: Increases damage and healing done by magical spells and effects by up to 6.",
+            "Enchanted: Stamina +2 and Armor +16" },
+        expected = { armor = 123, stamina = 2, spellDamage = 6, healing = 6 } },
+    { id = 15510, name = "Grunt's Belt of the Physician", equipLoc = "INVTYPE_WAIST",
+        raw = { ITEM_MOD_INTELLECT_SHORT = 4, ITEM_MOD_SPELL_DAMAGE_DONE_SHORT = 1,
+            ITEM_MOD_SPELL_HEALING_DONE_SHORT = 4, ITEM_MOD_SPIRIT_SHORT = 2, RESISTANCE0_NAME = 94 },
+        lines = { "94 Armor", "+4 Intellect", "+2 Spirit",
+            "Equip: Increases healing done by up to 4 and damage done by up to 1 for all magical spells and effects." },
+        expected = { armor = 94, intellect = 4, spirit = 2, spellDamage = 1, healing = 4 } },
+    { id = 250621, name = "Strange Copper Boots", equipLoc = "INVTYPE_FEET",
+        raw = { ITEM_MOD_SPELL_POWER_SHORT = 5, ITEM_MOD_STAMINA_SHORT = 4, RESISTANCE0_NAME = 109 },
+        lines = { "109 Armor", "+4 Stamina", "Equip: Increases damage and healing done by magical spells and effects by up to 5.",
+            "Enchanted: Stamina +2 and Armor +16", "<Made by Zwyk Zw>" },
+        expected = { armor = 125, stamina = 6, spellDamage = 5, healing = 5 } },
+    { id = 270023, name = "Tanned Shoulderpads", equipLoc = "INVTYPE_SHOULDER",
+        raw = { ITEM_MOD_SPELL_DAMAGE_DONE_SHORT = 3, ITEM_MOD_SPELL_HEALING_DONE_SHORT = 9,
+            ITEM_MOD_STAMINA_SHORT = 9, RESISTANCE0_NAME = 73 },
+        lines = { "73 Armor", "+9 Stamina",
+            "Equip: Increases healing done by up to 9 and damage done by up to 3 for all magical spells and effects." },
+        expected = { armor = 73, stamina = 9, spellDamage = 3, healing = 9 } },
+    { id = 9779, name = "Bandit Cloak of the Hierophant", equipLoc = "INVTYPE_CLOAK",
+        raw = { ITEM_MOD_SPELL_DAMAGE_DONE_SHORT = 1, ITEM_MOD_SPELL_HEALING_DONE_SHORT = 2,
+            ITEM_MOD_SPIRIT_SHORT = 1, ITEM_MOD_STAMINA_SHORT = 2, RESISTANCE0_NAME = 16 },
+        lines = { "16 Armor", "+2 Stamina", "+1 Spirit",
+            "Equip: Increases healing done by up to 2 and damage done by up to 1 for all magical spells and effects." },
+        expected = { armor = 16, stamina = 2, spirit = 1, spellDamage = 1, healing = 2 } },
+}
+for _, sample in ipairs(foreverCases) do
+    table.insert(sample.lines, 1, sample.name)
+    FW = newReader(sample)
+    item = assert(FW:GetItem("item:" .. sample.id .. ":8481"))
+    for key, value in pairs(sample.expected) do equal(item.stats[key], value, sample.name .. " " .. key) end
+    for key, value in pairs(item.stats) do equal(value, sample.expected[key], sample.name .. " unexpected " .. key) end
+    equal(item.partial, false, sample.name .. " resolves without warnings")
+    equal(#item.unrecognizedLines, 0)
+    equal(next(item.unresolvedStats), nil)
+    equal(FW:GetIssueReport().itemCount, 0)
+    equal(FW:GetItem("item:" .. sample.id .. ":8481"), item, "resolved item caches")
+    equal(item.parserVersion, 3, "old persisted parser results receive a new key")
+end
+
+FW = newReader({ raw = { RESISTANCE0_NAME = 141, ITEM_MOD_STAMINA_SHORT = 4 },
+    lines = { "Test Item", "157 Armor", "+4 Stamina", "Enchanted: Stamina +2 and Armor +16" } })
+item = assert(FW:GetItem("item:123:8481"))
+equal(item.stats.armor, 157, "a displayed total that includes an armor enchant is not increased twice")
+equal(item.stats.stamina, 6)
+
+FW = newReader({ raw = { ITEM_MOD_STAMINA_SHORT = 4 },
+    lines = { "Test Item", "Enchanted: Stamina +2" } })
+item = assert(FW:GetItem("item:124:8481"))
+equal(item.stats.stamina, 6, "an enchant supplements API base stats even without a normal stat line")
+
+FW = newReader({ raw = {}, lines = { "Test Item",
+    "Equip: Increases healing done by up to 9 and damage done by up to 3 for all magical spells and effects." } })
+item = assert(FW:GetItem("item:125"))
+equal(item.stats.healing, 9); equal(item.stats.spellDamage, 3)
+equal(item.partial, false, "combined healing and spell damage can be read without API values")
+
+FW = newReader({ raw = { ITEM_MOD_STAMINA_SHORT = 4 },
+    lines = { "Test Item", "+4 Stamina", "Enchanted: Stamina +2 and Armor +16 and Mystery Flux +7" } })
+item = assert(FW:GetItem("item:126:8481"))
+equal(item.stats.stamina, 6); equal(item.stats.armor, 16)
+equal(item.partial, true, "recognized enchant clauses cannot hide an unknown clause")
+equal(#item.unrecognizedLines, 1)
+equal(item.unresolvedStats.stamina, nil, "a fully recognized clause is not marked unresolved")
+equal(next(FW.DB.cache.items), nil)
+assert(FW:IsPotentialStatLine("Enchanted: Grants 7 Mystery Flux"))
+
+FW = newReader({ raw = {}, lines = { "Test Item",
+    "Equip: Increases healing done by up to 9 and damage done by up to 3 for all magical spells and effects and grants 7 Mystery Flux." } })
+item = assert(FW:GetItem("item:127"))
+equal(item.partial, true, "combined spell wording must match the entire effect")
+equal(item.stats.healing, nil); equal(item.stats.spellDamage, nil)
+
+FW = newReader({ raw = { ITEM_MOD_SPELL_DAMAGE_DONE_SHORT = 20 }, lines = { "Test Item",
+    "Equip: Increases Fire spell damage by up to 20.", "Enchanted: Spell Damage +5" } })
+item = assert(FW:GetItem("item:128:1"))
+equal(item.stats.fireDamage, 20)
+equal(item.stats.spellDamage, 5, "an enchant cannot preserve a false generic alias for school-only damage")
+equal(item.partial, false)
+
 print("Items tests passed")

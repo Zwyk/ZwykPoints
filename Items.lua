@@ -1,5 +1,5 @@
 local _, FW = ...
-local MAX_ITEMS, PARSER_VERSION = 2000, 2
+local MAX_ITEMS, PARSER_VERSION = 2000, 3
 
 local function number(value)
     if issecretvalue and issecretvalue(value) then return nil end
@@ -275,6 +275,33 @@ local function directValue(text, label, percent)
         or number(text:match("^" .. label .. "%s*%+?%s*([%+%-]?[%d%.,]+)" .. suffix .. "$"))
 end
 
+local function enchantValues(content)
+    local values, unknown = {}, {}
+    -- Split only explicit enchant conjunctions. Each clause must still match a
+    -- complete stat label/value; a known clause cannot hide an unknown effect.
+    content = content:gsub(" and ", "\n"):gsub(" et ", "\n")
+    for clause in (content .. "\n"):gmatch("(.-)\n") do
+        local handled = false
+        for key, list in pairs(getLabels()) do
+            if not FW.StatByKey[key].secondary then
+                for _, label in ipairs(list) do
+                    local value = directValue(clause, label, false)
+                    if value then add(values, key, value); handled = true; break end
+                end
+            end
+        end
+        local allStats = number(clause:match("^%+([%d%.,]+) all stats$"))
+            or number(clause:match("^all stats %+(%d+)$"))
+            or number(clause:match("^%+([%d%.,]+) à toutes les caractéristiques$"))
+        if allStats then
+            for _, key in ipairs({ "strength", "agility", "stamina", "intellect", "spirit" }) do add(values, key, allStats) end
+            handled = true
+        end
+        if not handled then unknown[#unknown + 1] = clause end
+    end
+    return values, #unknown == 0, table.concat(unknown, " and ")
+end
+
 local function conditional(text)
     return text:find("^use:") or text:find("^utiliser%s*:") or text:find("^utilisation%s*:")
         or text:find("^chance on hit:") or text:find("^chances quand vous touchez")
@@ -308,6 +335,7 @@ function FW:IsPotentialStatLine(line)
     if text:find("%s[%+%-][%d%.,]+%s*%%?$") then return true end
     local equip = text:find("^equip:") or text:find("^équipé%s*:") or text:find("^équipement%s*:")
     if equip and text:find("%d") then return true end
+    if (text:find("^enchanted%s*:") or text:find("^enchanté%s*:")) and text:find("%d") then return true end
     return false
 end
 
@@ -318,7 +346,7 @@ local function unrecognized(record, line, index, reason)
 end
 
 local function scan(record, lines)
-    local parsed, percentages, weapon = {}, {}, {}
+    local parsed, enchants, percentages, weapon = {}, {}, {}, {}
     local locale = GetLocale and GetLocale() or "enUS"
     local supportedLocale = locale == "enUS" or locale == "enGB" or locale == "frFR"
     if not supportedLocale then
@@ -334,6 +362,13 @@ local function scan(record, lines)
             local content = text:gsub("^equip:%s*", ""):gsub("^équipé%s*:%s*", "")
                 :gsub("^équipement%s*:%s*", ""):gsub("%.$", "")
             local handled = false
+            local enchant = content:match("^enchanted%s*:%s*(.+)$") or content:match("^enchanté%s*:%s*(.+)$")
+            local unresolvedContent
+            if enchant then
+                local values
+                values, handled, unresolvedContent = enchantValues(enchant)
+                for key, value in pairs(values) do add(enchants, key, value) end
+            end
             for key, list in pairs(getLabels()) do
                 for _, label in ipairs(list) do
                     local definition = FW.StatByKey[key]
@@ -442,6 +477,10 @@ local function scan(record, lines)
                 if value then percentages.defense = percentages.defense or {}; add(percentages.defense, "generic", value); handled = true end
             end
             if not handled then
+                local healing, damage = content:match("^increases healing done by up to ([%d%.,]+) and damage done by up to ([%d%.,]+) for all magical spells and effects$")
+                if healing and damage then
+                    add(parsed, "healing", number(healing)); add(parsed, "spellDamage", number(damage)); handled = true
+                end
                 local value = number(content:match("^increases damage and healing done by magical spells and effects by up to ([%d%.,]+)$"))
                     or number(content:match("^augmente les dégâts et les soins produits par les sorts et effets magiques de ([%d%.,]+) au maximum$"))
                 if value then add(parsed, "spellDamage", value); add(parsed, "healing", value); handled = true end
@@ -463,7 +502,7 @@ local function scan(record, lines)
                 -- procs and flavor text are excluded and do not create warnings.
                 for key, list in pairs(getLabels()) do
                     for _, label in ipairs(list) do
-                        if content:find(label, 1, true) then
+                        if (unresolvedContent or content):find(label, 1, true) then
                             record.unresolvedStats[key] = true
                             break
                         end
@@ -473,13 +512,14 @@ local function scan(record, lines)
             if not handled and FW:IsPotentialStatLine(line) then
                 for key, list in pairs(getLabels()) do
                     for _, label in ipairs(list) do
-                        if content:find(label, 1, true) then record.unresolvedStats[key] = true; break end
+                        if (unresolvedContent or content):find(label, 1, true) then record.unresolvedStats[key] = true; break end
                     end
                 end
                 unrecognized(record, line, lineIndex, "Unrecognized static item stat")
             end
         end
     end
+    local apiArmor = record.stats.armor
     for key, value in pairs(parsed) do record.stats[key] = value end
     if parsed.blockValueBonus and parsed.blockValue == nil and record.stats.blockValue == parsed.blockValueBonus then
         record.stats.blockValue = nil
@@ -491,6 +531,13 @@ local function scan(record, lines)
     if schoolTotal > 0 and parsed.spellDamage == nil and record.stats.spellDamage == schoolTotal then
         record.stats.spellDamage = nil
         if parsed.healing == nil and record.stats.healing == schoolTotal then record.stats.healing = nil end
+    end
+    for key, value in pairs(enchants) do
+        -- The API exposes base item stats. Some tooltips fold armor enchants
+        -- into the armor line; that displayed total must not gain it twice.
+        if key ~= "armor" or not apiArmor or not parsed.armor or parsed.armor < apiArmor + value then
+            add(record.stats, key, value)
+        end
     end
     for key, values in pairs(percentages) do
         record.percentStats[key] = math.max(values.generic or 0, values.melee or 0, values.ranged or 0, values.spell or 0)

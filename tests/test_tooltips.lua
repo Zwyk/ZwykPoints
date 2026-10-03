@@ -1,4 +1,24 @@
 local FW = { DB = {}, equipmentRevision = 0 }
+-- The markup must resolve to actual client-readable textures in the package.
+-- Test dimensions, alpha and colors so a missing/broken asset cannot silently
+-- turn the comparison indicator back into a box.
+for _, asset in ipairs({{"ArrowUp",64,255,89}, {"ArrowDown",255,89,89}}) do
+    local file = assert(io.open("Textures/" .. asset[1] .. ".tga", "rb"))
+    local bytes = file:read("*a"); file:close()
+    assert(#bytes == 18 + 16 * 16 * 4 and bytes:byte(3) == 2)
+    assert(bytes:byte(13) == 16 and bytes:byte(14) == 0)
+    assert(bytes:byte(15) == 16 and bytes:byte(16) == 0)
+    assert(bytes:byte(17) == 32 and bytes:byte(18) == 40)
+    local visible, transparent = 0, 0
+    for offset = 19, #bytes, 4 do
+        local b,g,r,a = bytes:byte(offset,offset+3)
+        if a == 255 then
+            visible = visible + 1
+            assert(r == asset[2] and g == asset[3] and b == asset[4])
+        else assert(a == 0); transparent = transparent + 1 end
+    end
+    assert(visible > 0 and transparent > 0)
+end
 local profiles = {
     {id="one",name="Melee",revision=1,color={r=.8,g=.2,b=.1}},
     {id="two",name="Caster",revision=1,color={r=.1,g=.3,b=.9}},
@@ -107,7 +127,7 @@ assert(count==3 and calls.compare==2)
 postCall(GameTooltip,{hyperlink="item:100"})
 GameTooltip:Fire("OnTooltipSetItem")
 assert(#GameTooltip.lines==count and calls.compare==2)
-assert(GameTooltip.lines[2].text=="Melee" and GameTooltip.lines[2].right=="100.00 |cff40ff59↑+10.00 (+11.1%)|r")
+assert(GameTooltip.lines[2].text=="Melee" and GameTooltip.lines[2].right=="100.00  |cff40ff59|TInterface\\AddOns\\ZwykValues\\Textures\\ArrowUp:12:12:0:0|t+10.00 (+11.1%)|r")
 assert(GameTooltip.lines[2].r==.8 and GameTooltip.lines[2].rr==.8)
 assert(GameTooltip.lines[3].b==.9 and GameTooltip.lines[3].bb==.9)
 for _,line in ipairs(GameTooltip.lines) do assert(line.text~="ZwykValues") end
@@ -237,7 +257,7 @@ end
 local rings=tooltip("RingsTooltip","item:710")
 postCall(rings,{hyperlink="item:710"})
 assert(#rings.lines==2 and rings.lines[2].right==
-    "2.56 |cff40ff59↑+1.52 (+146.2%)|r | |cffb2b2b2=0.00 (+0.0%)|r")
+    "2.56  |cff40ff59|TInterface\\AddOns\\ZwykValues\\Textures\\ArrowUp:12:12:0:0|t+1.52 (+146.2%)|r | |cffb2b2b2=0.00 (+0.0%)|r")
 assert(rings.lines[2].r==.8 and rings.lines[2].rr==.8)
 FW.CompareItem=function()
     return {score=90,record=record,comparisons={
@@ -249,7 +269,7 @@ end
 local lower=tooltip("LowerTooltip","item:711")
 postCall(lower,{hyperlink="item:711"})
 assert(lower.lines[2].right==
-    "90.00 |cffff5959↓-10.00 (-10.0%)|r | |cff40ff59↑+90.00 (n/a)|r | |cffb2b2b2=0.00 (+0.0%)|r")
+    "90.00  |cffff5959|TInterface\\AddOns\\ZwykValues\\Textures\\ArrowDown:12:12:0:0|t-10.00 (-10.0%)|r | |cff40ff59|TInterface\\AddOns\\ZwykValues\\Textures\\ArrowUp:12:12:0:0|t+90.00 (n/a)|r | |cffb2b2b2=0.00 (+0.0%)|r")
 
 -- Partial extraction and profile-only unit issues keep every score and add one
 -- warning, even with debug markers off and more than one active profile.

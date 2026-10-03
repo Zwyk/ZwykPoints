@@ -93,10 +93,14 @@ local function formatNumber(value, signed)
     local result = string.format(signed and "%+.2f" or "%.2f", value)
     return result
 end
+-- Tooltip fonts on some Forever clients have no Unicode arrow glyphs. Use
+-- packaged textures so profile fonts cannot turn the indicators into boxes.
+local upArrow = "|TInterface\\AddOns\\ZwykValues\\Textures\\ArrowUp:12:12:0:0|t"
+local downArrow = "|TInterface\\AddOns\\ZwykValues\\Textures\\ArrowDown:12:12:0:0|t"
 local function comparisonText(item)
     if item.error then return "|cffb2b2b2? comparison unavailable|r" end
     local equal = item.status == "equal"
-    local arrow = equal and "=" or (item.status == "upgrade" and "↑" or "↓")
+    local arrow = equal and "=" or (item.status == "upgrade" and upArrow or downArrow)
     local color = equal and "b2b2b2" or (item.status == "upgrade" and "40ff59" or "ff5959")
     local delta = equal and "0.00" or formatNumber(item.delta, true)
     local percent = equal and "+0.0%" or (item.percent and string.format("%+.1f%%", item.percent))
@@ -169,7 +173,7 @@ function FW:DecorateTooltip(tooltip, data)
                 issues = issues or item.hasIssues
             end
             local values = formatNumber(result.score)
-            if #comparisons > 0 then values = values .. " " .. table.concat(comparisons, " | ") end
+            if #comparisons > 0 then values = values .. "  " .. table.concat(comparisons, " | ") end
             tooltip:AddDoubleLine(profile.name, values, r,g,b, r,g,b)
             if result.note then notes[result.note] = true end
             issues = issues or result.hasIssues or hasIssues(result.record, profile)

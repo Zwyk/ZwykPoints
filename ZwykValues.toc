@@ -1,8 +1,8 @@
-## Interface: 16000
+## Interface: 16001
 ## Title: ZwykValues
 ## Notes: Custom stat-weight profiles, cached item scores, and equipped comparisons for WoW Forever.
 ## Author: Felix
-## Version: 0.1.3
+## Version: 0.1.4
 ## SavedVariables: ZwykValuesDB
 
 JSON.lua

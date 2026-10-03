@@ -107,8 +107,8 @@ assert(reads==2 and scans==2 and scoreCalls==4)
 local function findLine(text)
     for _,line in ipairs(GameTooltip.lines) do if line.left==text then return line end end
 end
-assert(findLine("Melee").right=="30.00 |cff40ff59↑+4.00 (+15.4%)|r")
-assert(findLine("Caster").right=="5.00 |cffb2b2b2=0.00 (+0.0%)|r")
+assert(findLine("Melee").right=="30.00  |cff40ff59|TInterface\\AddOns\\ZwykValues\\Textures\\ArrowUp:12:12:0:0|t+4.00 (+15.4%)|r")
+assert(findLine("Caster").right=="5.00  |cffb2b2b2=0.00 (+0.0%)|r")
 assert(not findLine("ZwykValues"), "Tooltip should not add an addon header")
 local lineCount=#GameTooltip.lines
 GameTooltip:Fire("OnTooltipSetItem")
@@ -120,7 +120,7 @@ assert(reads==2 and scans==2 and scoreCalls==4)
 assert(FW:UpdateProfile(one.id,{weights={strength=3}}))
 GameTooltip:SetHyperlink(candidate)
 assert(reads==2 and scans==2 and scoreCalls==6)
-assert(findLine("Melee").right=="40.00 |cff40ff59↑+6.00 (+17.6%)|r")
+assert(findLine("Melee").right=="40.00  |cff40ff59|TInterface\\AddOns\\ZwykValues\\Textures\\ArrowUp:12:12:0:0|t+6.00 (+17.6%)|r")
 assert(FW:GetScore(variant,one)==55)
 assert(reads==3 and scans==3 and scoreCalls==7)
 assert(FW:GetScore(candidate,one)==40 and scoreCalls==7)
@@ -128,8 +128,8 @@ assert(FW:GetScore(candidate,one)==40 and scoreCalls==7)
 -- A genuinely partial item still shows both profile subtotals, one warning,
 -- and a complete aggregate diagnostic entry, even with inline debugging off.
 GameTooltip:SetHyperlink(partial)
-assert(findLine("Melee").right=="46.00 |cff40ff59↑+12.00 (+35.3%)|r")
-assert(findLine("Caster").right=="5.00 |cffb2b2b2=0.00 (+0.0%)|r")
+assert(findLine("Melee").right=="46.00  |cff40ff59|TInterface\\AddOns\\ZwykValues\\Textures\\ArrowUp:12:12:0:0|t+12.00 (+35.3%)|r")
+assert(findLine("Caster").right=="5.00  |cffb2b2b2=0.00 (+0.0%)|r")
 local warningCount=0
 for _,line in ipairs(GameTooltip.lines) do
     if line.left:find("Partial stat data",1,true) then warningCount=warningCount+1 end
@@ -144,7 +144,7 @@ assert(not FW.DB.cache.items[FW:ItemKey(partial)] and not FW.DB.cache.scores[FW:
 local oldBaseline=baseline
 baseline=partial
 GameTooltip:SetHyperlink(candidate)
-assert(findLine("Melee").right=="40.00 |cffff5959↓-6.00 (-13.0%)|r")
+assert(findLine("Melee").right=="40.00  |cffff5959|TInterface\\AddOns\\ZwykValues\\Textures\\ArrowDown:12:12:0:0|t-6.00 (-13.0%)|r")
 assert(findLine("Partial stat data; /zv inspect or /zv exportissues."))
 baseline=oldBaseline
 

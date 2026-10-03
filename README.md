@@ -1,4 +1,4 @@
-# ZwykValues 0.1.3
+# ZwykValues 0.1.4
 
 A standalone stat-weight addon written from scratch for WoW Forever. No Pawn code, Pawn dependency, third-party libraries, or online item database is required.
 
@@ -11,7 +11,7 @@ A standalone stat-weight addon written from scratch for WoW Forever. No Pawn cod
 
 For a GitHub download, choose **Code → Download ZIP** in the repository, extract it, rename the unpacked repository folder (for example, `ZwykValues-main`) to `ZwykValues`, and copy that folder into `Interface/AddOns`.
 
-The manifest targets interface `16000` (the 1.60 client family). This has not been confirmed against a running Forever client here. The active interface number can be checked with `/dump select(4, GetBuildInfo())` and substituted into the TOC if necessary.
+The manifest targets interface `16001`, as reported by the Forever 1.60.1 client in the supplied diagnostics. The active interface number can be checked with `/dump select(4, GetBuildInfo())` if a later client lists the addon as out of date.
 
 ### Upgrading from ZwykPoints or ForeverWeights
 
@@ -56,17 +56,19 @@ Merged melee/ranged/spell hit and crit aliases are counted once. The reader pref
 
 `weaponDamage` is the explicit flat bonus (for example, `+1 Weapon Damage`), not the weapon's average base damage. To value average base damage, use half of the intended average-damage weight for both `lowDamage` and `highDamage`. JSON key compatibility is preserved, but all Sixty Upgrades field semantics have not been independently verified; check the units above when importing existing profiles.
 
+Separate healing/damage effects and compound static enchant lines (for example, `Enchanted: Stamina +2 and Armor +16`) are recognized. Known enchant bonuses are included once; API base stats and the same tooltip stats are not added together.
+
 English and French static tooltip text are supported, with localized Blizzard formats used where available. Other locales can still expose API stats, but unrecognized tooltip-only values need further validation.
 
 ## Tooltip comparisons
 
 Every active profile adds one row with its name and score in the profile color. Candidate items show the signed point difference and percentage difference inline, with only the comparison fragment colored green for an increase, red for a decrease, or gray for equality:
 
-`Mageladin    2.56 ↑+1.52 (+146.2%)`
+`Mageladin    2.56  ↑+1.52 (+146.2%)`
 
-The indicators are `↑`, `↓`, and `=`. Multiple replacement choices share the same row, in equipped slot order:
+The up/down indicators use packaged arrow textures so they display even when the tooltip font has no Unicode arrow glyphs. Equality uses `=`. Two spaces separate the score from the first comparison. Multiple replacement choices share the same row, in equipped slot order:
 
-`Mageladin    2.56 ↑+1.52 (+146.2%) | =0.00 (+0.0%)`
+`Mageladin    2.56  ↑+1.52 (+146.2%) | =0.00 (+0.0%)`
 
 Percentages use:
 
@@ -75,6 +77,8 @@ Percentages use:
 Rings and trinkets show both replacement choices. A two-handed weapon is compared to the combined equipped main-hand and off-hand score. Generic one-handed weapons show an off-hand comparison only when dual wielding is available and the equipped main hand is compatible. A shield/off-hand item does not receive a misleading comparison against a two-handed main hand.
 
 An empty slot has score zero; a zero or negative baseline displays **percentage n/a** unless the scores are equal, which displays `=0.00 (+0.0%)`. Equipped and native shopping tooltips show their own item scores without recursively repeating candidate comparisons. Comparisons involving a partial candidate or equipped baseline display a warning because the missing stats could change the result. The addon evaluates item stats, not whether your class can equip every item you inspect.
+
+After upgrading to 0.1.4, parser-versioned cache keys automatically refresh item stats and scores. Issue exports intentionally preserve historical problems: use `/zv clearissues`, then hover the items again to collect a report for the new parser.
 
 ## Debugging unrecognized stats
 
@@ -131,6 +135,7 @@ lua tests/test_ui.lua
 - `Items.lua`: item variants, client data loading, normalization, and static tooltip parsing.
 - `Compare.lua`: equipped slot comparisons.
 - `Tooltips.lua`: native tooltip hooks and refresh handling.
+- `Textures/ArrowUp.tga` and `Textures/ArrowDown.tga`: tooltip comparison indicators.
 - `UI.lua`: profile and weight editor.
 - `Bootstrap.lua`: saved variables lifecycle, events, diagnostics, and slash commands.
 
