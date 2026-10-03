@@ -1,4 +1,4 @@
--- Plain Lua 5.1+ tests; execute from the ZwykPoints project directory.
+-- Plain Lua 5.1+ tests; execute from the ZwykValues project directory.
 local source = "./"
 if not io.open("Stats.lua", "r") then source = "../" end
 local function equal(actual, expected, message)
@@ -34,8 +34,8 @@ local function newReader(item)
     CreateFrame = nil
     RETRIEVING_ITEM_INFO, RETRIEVING_DATA = "Retrieving item information", "Retrieving data"
     local FW = { DB = { cache = { items = {}, itemOrder = {}, scores = {} } } }
-    assert(loadfile(source .. "Stats.lua"))("ZwykPoints", FW)
-    assert(loadfile(source .. "Items.lua"))("ZwykPoints", FW)
+    assert(loadfile(source .. "Stats.lua"))("ZwykValues", FW)
+    assert(loadfile(source .. "Items.lua"))("ZwykValues", FW)
     return FW
 end
 

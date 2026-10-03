@@ -83,11 +83,11 @@ local function frame(name)
 end
 GameTooltip=frame("GameTooltip")
 CreateFrame=function(kind,name)
-    assert(kind=="GameTooltip" and name=="ZwykPointsScanTooltip")
+    assert(kind=="GameTooltip" and name=="ZwykValuesScanTooltip")
     local scanner=frame(name);_G[name]=scanner;return scanner
 end
 for _,file in ipairs({"JSON.lua","Stats.lua","Core.lua","Items.lua","Compare.lua","Tooltips.lua"}) do
-    assert(loadfile(file))("ZwykPoints",FW)
+    assert(loadfile(file))("ZwykValues",FW)
 end
 local actualScoreStats=FW.ScoreStats
 function FW:ScoreStats(profile,stats) scoreCalls=scoreCalls+1;return actualScoreStats(self,profile,stats) end
@@ -126,11 +126,11 @@ assert(FW.ScanTooltip and not FW.ScanTooltip.fwHooked and not FW.ScanTooltip.fwS
 assert(FW.ScanTooltip:NumLines()==3 and not FW.ScanTooltip:IsShown())
 
 -- SavedVariables reused by a fresh addon namespace keep valid item totals.
-local persisted=ZwykPointsDB
+local persisted=ZwykValuesDB
 local reloaded={}
 postCall=nil -- A client reload removes previous Lua/frame callback state.
 for _,file in ipairs({"JSON.lua","Stats.lua","Core.lua","Items.lua"}) do
-    assert(loadfile(file))("ZwykPoints",reloaded)
+    assert(loadfile(file))("ZwykValues",reloaded)
 end
 reloaded:Initialize()
 assert(reloaded.DB==persisted)

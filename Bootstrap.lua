@@ -1,9 +1,9 @@
 local addonName, FW = ...
-_G.ZwykPoints = FW
-FW.version = "0.1.1"
+_G.ZwykValues = FW
+FW.version = "0.1.2"
 
 function FW:Print(message)
-    local text = "|cff80ccffZwykPoints:|r " .. tostring(message)
+    local text = "|cff80ccffZwykValues:|r " .. tostring(message)
     if DEFAULT_CHAT_FRAME then DEFAULT_CHAT_FRAME:AddMessage(text) else print(text) end
 end
 
@@ -15,7 +15,7 @@ end
 
 local function inspect(link)
     link = link or FW:GetHoveredItemLink() or (GetInventoryItemLink and GetInventoryItemLink("player", 16))
-    if not link then FW:Print("Hover an item or type /zp inspect <item link>."); return end
+    if not link then FW:Print("Hover an item or type /zv inspect <item link>."); return end
     local record, err = FW:GetItem(link)
     if not record then FW:Print(tostring(err)); return end
     local raw = FW.GetRawItemStats and FW:GetRawItemStats(link) or {}
@@ -30,9 +30,9 @@ local function inspect(link)
     else FW:Print(json or tostring(encodeError)) end
 end
 
-SLASH_ZWYKPOINTS1 = "/zp"
-SLASH_ZWYKPOINTS2 = "/zwykpoints"
-SlashCmdList.ZWYKPOINTS = function(message)
+SLASH_ZWYKVALUES1 = "/zv"
+SLASH_ZWYKVALUES2 = "/zwykvalues"
+SlashCmdList.ZWYKVALUES = function(message)
     local command, rest = (message or ""):match("^%s*(%S*)%s*(.-)%s*$")
     command = command:lower()
     if command == "cache" then
@@ -43,7 +43,7 @@ SlashCmdList.ZWYKPOINTS = function(message)
     elseif command == "inspect" then
         inspect(rest ~= "" and rest or nil)
     elseif command == "help" then
-        FW:Print("/zp opens profiles. /zp cache, /zp clearcache, /zp inspect [item link].")
+        FW:Print("/zv opens profiles. /zv cache, /zv clearcache, /zv inspect [item link].")
     else FW:ToggleUI() end
 end
 

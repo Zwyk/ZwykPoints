@@ -1,23 +1,23 @@
-# ZwykPoints 0.1.1
+# ZwykValues 0.1.2
 
 A standalone stat-weight addon written from scratch for WoW Forever. No Pawn code, Pawn dependency, third-party libraries, or online item database is required.
 
 ## Installation
 
 1. Close WoW or return to the character selection screen.
-2. Extract the `ZwykPoints` folder into the Forever client's `Interface/AddOns` folder. The resulting path must be `Interface/AddOns/ZwykPoints/ZwykPoints.toc`.
-3. Enable **ZwykPoints** in the AddOns list. If the current beta lists it as out of date, enable **Load out of date AddOns**.
-4. Log in and type `/zp`.
+2. Extract the `ZwykValues` folder into the Forever client's `Interface/AddOns` folder. The resulting path must be `Interface/AddOns/ZwykValues/ZwykValues.toc`.
+3. Enable **ZwykValues** in the AddOns list. If the current beta lists it as out of date, enable **Load out of date AddOns**.
+4. Log in and type `/zv`.
 
-For a GitHub download, choose **Code → Download ZIP** in `Zwyk/ZwykPoints`, extract it, rename the unpacked `ZwykPoints-main` folder to `ZwykPoints`, and copy that folder into `Interface/AddOns`.
+For a GitHub download, choose **Code → Download ZIP** in the repository, extract it, rename the unpacked repository folder (for example, `ZwykPoints-main`) to `ZwykValues`, and copy that folder into `Interface/AddOns`.
 
 The manifest targets interface `16000` (the 1.60 client family). This has not been confirmed against a running Forever client here. The active interface number can be checked with `/dump select(4, GetBuildInfo())` and substituted into the TOC if necessary.
 
-### Upgrading from ForeverWeights
+### Upgrading from ZwykPoints or ForeverWeights
 
-Before removing the old `ForeverWeights` folder, export each profile with **Export profile** using `/fw`. Install ZwykPoints, open `/zp`, and import those exports. Legacy `ForeverWeights` profile JSON and bare Sixty Upgrades weights remain accepted; new profile exports identify their format as `ZwykPoints`.
+Before removing the old addon folder, export each profile with **Export profile** from ZwykPoints (`/zwykpoints`) or ForeverWeights (`/fw`). Install ZwykValues, open `/zv`, and import those exports. Legacy `ZwykPoints` and `ForeverWeights` profile JSON and bare Sixty Upgrades weights remain accepted; new profile exports identify their format as `ZwykValues`.
 
-WoW stores each addon's SavedVariables in a file named after that addon, so renaming the folder does not automatically load the old saved profiles. If `ForeverWeightsDB` is already loaded by the old addon when ZwykPoints first initializes, ZwykPoints copies its profiles, options, and compatible cache into an independent database. Export/import is the reliable migration path when the old folder is removed or disabled. After migration, keep only ZwykPoints enabled to avoid duplicate tooltip scores.
+WoW stores each addon's SavedVariables in a file named after that addon, so renaming the folder does not automatically load the old saved profiles. If `ZwykPointsDB` is already loaded when ZwykValues first initializes, ZwykValues copies its profiles, options, and compatible cache into an independent database. Otherwise it can copy a loaded `ForeverWeightsDB`. Existing `ZwykValuesDB` data always takes precedence. Export/import is the reliable migration path when the old folder is removed or disabled. After migration, keep only ZwykValues enabled to avoid duplicate tooltip scores. ZwykValues registers only `/zv` and `/zwykvalues`, leaving `/zp` available for ZwykPlus.
 
 ## Profiles
 
@@ -70,7 +70,7 @@ An empty slot has score zero; a zero or negative baseline displays **percentage 
 
 ## Debugging unrecognized stats
 
-Enable **Mark unrecognized stats in tooltips** in the editor. Static stat lines that the parser cannot recognize receive an orange `[ZP ?]` marker next to their text. This also works with no active profiles. It is off by default and does not change weights or item scores.
+Enable **Mark unrecognized stats in tooltips** in the editor. Static stat lines that the parser cannot recognize receive an orange `[ZV ?]` marker next to their text. This also works with no active profiles. It is off by default and does not change weights or item scores.
 
 Diagnostics include those lines, raw client stat keys, and parser warnings. Item descriptions, requirements, use effects, and set/proc descriptions are not marked as missing static stats. The detection is deliberately limited to stat-looking lines; it cannot identify every possible novel tooltip wording before that wording has been observed.
 
@@ -82,18 +82,18 @@ Editing weights or units increments the profile revision and invalidates its sco
 
 | Command | Action |
 | --- | --- |
-| `/zp` or `/zwykpoints` | Open or close the profile editor |
-| `/zp cache` | Show item and score cache counts |
-| `/zp clearcache` | Clear parsed stats and scores |
-| `/zp inspect` | Open diagnostics for a hovered item, or the main-hand item |
-| `/zp inspect <item link>` | Open diagnostics for a pasted item link |
-| `/zp help` | Show commands |
+| `/zv` or `/zwykvalues` | Open or close the profile editor |
+| `/zv cache` | Show item and score cache counts |
+| `/zv clearcache` | Clear parsed stats and scores |
+| `/zv inspect` | Open diagnostics for a hovered item, or the main-hand item |
+| `/zv inspect <item link>` | Open diagnostics for a pasted item link |
+| `/zv help` | Show commands |
 
 ## Scope and validation
 
 This release evaluates static item stats. It does not model procs, on-use effects, set bonuses, stat caps, talent interactions, DPS rotations, class equipment restrictions, or future equipment combinations. Spell-power or attack-power weights should already include their expected value for your build. A higher score is a stat-weight estimate, not a simulated DPS percentage.
 
-The Lua scoring, JSON, cache, parser, comparison, and tooltip/event logic are covered by mocked API tests included in `tests`. There is no running WoW client in this environment, so the actual UI rendering, the current Forever beta stat vocabulary, and secure tooltip behavior require an in-game check. Use `/zp inspect` to collect the raw keys and tooltip lines if an item is missing a stat or has an unavailable unit.
+The Lua scoring, JSON, cache, parser, comparison, and tooltip/event logic are covered by mocked API tests included in `tests`. There is no running WoW client in this environment, so the actual UI rendering, the current Forever beta stat vocabulary, and secure tooltip behavior require an in-game check. Use `/zv inspect` to collect the raw keys and tooltip lines if an item is missing a stat or has an unavailable unit.
 
 Run the included tests from the addon directory with a Lua interpreter, for example:
 

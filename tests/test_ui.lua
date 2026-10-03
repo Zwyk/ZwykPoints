@@ -109,20 +109,20 @@ local popup
 StaticPopup_Show = function(kind, _, _, data) popup = { kind = kind, data = data } end
 
 local FW = {}
-for _, file in ipairs({ "JSON.lua", "Stats.lua", "Core.lua", "UI.lua" }) do assert(loadfile(addonPath .. "/" .. file))("ZwykPoints", FW) end
+for _, file in ipairs({ "JSON.lua", "Stats.lua", "Core.lua", "UI.lua" }) do assert(loadfile(addonPath .. "/" .. file))("ZwykValues", FW) end
 local tooltipRefreshes = 0
 function FW:RefreshTooltips() tooltipRefreshes = tooltipRefreshes + 1 end
 function FW:InstallTooltipHooks() end
-assert(loadfile(addonPath .. "/Bootstrap.lua"))("ZwykPoints", FW)
+assert(loadfile(addonPath .. "/Bootstrap.lua"))("ZwykValues", FW)
 equal(FW.UI, nil, "loading modules creates no editor")
 FW:Initialize()
 equal(FW.UI, nil, "initializing profiles preserves lazy editor construction")
-SlashCmdList.ZWYKPOINTS("")
-check(FW.UI and FW.UI:IsShown(), "/zp opens the editor")
+SlashCmdList.ZWYKVALUES("")
+check(FW.UI and FW.UI:IsShown(), "/zv opens the editor")
 local created = #widgets
-SlashCmdList.ZWYKPOINTS("")
-check(not FW.UI:IsShown(), "/zp closes the editor")
-SlashCmdList.ZWYKPOINTS("")
+SlashCmdList.ZWYKVALUES("")
+check(not FW.UI:IsShown(), "/zv closes the editor")
+SlashCmdList.ZWYKVALUES("")
 equal(#widgets, created, "reopening editor reuses widgets")
 
 local function find(predicate)
@@ -191,7 +191,7 @@ equal(#FW:GetProfiles(), 2, "copy creates another profile")
 local copied = FW:GetProfiles()[2]
 equal(copied.weights.strength, 4, "copy retains saved weights")
 click("Export")
-local dialogText = ZwykPointsJSONScroll.scrollChild
+local dialogText = ZwykValuesJSONScroll.scrollChild
 local exported = assert(FW.JSON.Decode(dialogText:GetText()))
 equal(exported.name, copied.name, "export is the selected full profile")
 equal(exported.weights.strength, 4, "export carries weights")
@@ -215,7 +215,7 @@ equal(#FW:GetProfiles(), 4, "New creates a blank profile")
 equal(FW:GetProfiles()[4].weights.strength, 0, "new profile is deliberately unweighted")
 click("Delete")
 equal(#FW:GetProfiles(), 4, "deleting requires the native confirmation")
-check(popup and popup.kind == "ZWYKPOINTS_DELETE_PROFILE")
+check(popup and popup.kind == "ZWYKVALUES_DELETE_PROFILE")
 StaticPopupDialogs[popup.kind].OnAccept(nil, popup.data)
 equal(#FW:GetProfiles(), 3, "accepting the confirmation deletes that profile")
 
@@ -241,6 +241,6 @@ for _, dimensions in ipairs({ {930, 720}, {850, 600} }) do
     separate(byText("Weights saved", "FontString"), byText("Weights JSON", "Button"), "weight state does not overlap action buttons")
     within(byText("Apply weights", "Button"), FW.UI, "apply button fits editor")
     within(byText("Clear cache", "Button"), FW.UI, "cache button fits footer")
-    check(ZwykPointsStatsScroll:GetHeight() >= 190, "resized editor keeps useful visible weight area")
+    check(ZwykValuesStatsScroll:GetHeight() >= 190, "resized editor keeps useful visible weight area")
 end
 print("UI: " .. passed .. " checks passed (widget smoke and approximate geometry).")

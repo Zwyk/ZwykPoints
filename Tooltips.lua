@@ -50,8 +50,8 @@ function FW:MarkUnknownStats(tooltip, record)
     local function mark(fontString)
         if not fontString or not fontString.GetText or not fontString.SetText then return end
         local text = safeString(fontString:GetText())
-        if text and unknown[plainText(text)] and not text:find("[ZP ?]", 1, true) then
-            fontString:SetText(text .. " |cffffaa33[ZP ?]|r")
+        if text and unknown[plainText(text)] and not text:find("[ZV ?]", 1, true) then
+            fontString:SetText(text .. " |cffffaa33[ZV ?]|r")
         end
     end
     local name = tooltip.GetName and tooltip:GetName()
@@ -108,7 +108,7 @@ function FW:DecorateTooltip(tooltip, data)
         not (self.DB.options and self.DB.options.showComparisons == false)
     if #profiles > 0 then
         tooltip:AddLine(" ")
-        tooltip:AddLine("ZwykPoints", 0.5, 0.8, 1)
+        tooltip:AddLine("ZwykValues", 0.5, 0.8, 1)
     end
     for _, profile in ipairs(profiles) do
         local r, g, b = profile.color.r, profile.color.g, profile.color.b
@@ -137,7 +137,7 @@ function FW:DecorateTooltip(tooltip, data)
             end
             if result.note then tooltip:AddLine("  " .. result.note, .75,.75,.75, true) end
             if result.record.partial then
-                tooltip:AddLine("  Partial stat data; use /zp inspect for details.", 1,.7,.25, true)
+                tooltip:AddLine("  Partial stat data; use /zv inspect for details.", 1,.7,.25, true)
             end
         else
             tooltip:AddLine(profile.name .. ": " .. tostring(errorMessage or "Item data loading"), r,g,b, true)

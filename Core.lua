@@ -115,11 +115,12 @@ function FW:Initialize()
     if self.DB then return self.DB end
     -- The old addon's SavedVariables are only available if that addon loaded.
     -- Copy them once so both addons never share mutable profile/cache tables.
-    if ZwykPointsDB == nil and type(_G.ForeverWeightsDB) == "table" then
-        ZwykPointsDB = copySavedTable(_G.ForeverWeightsDB)
+    if ZwykValuesDB == nil then
+        local legacy = type(_G.ZwykPointsDB) == "table" and _G.ZwykPointsDB or _G.ForeverWeightsDB
+        if type(legacy) == "table" then ZwykValuesDB = copySavedTable(legacy) end
     end
-    local db = type(ZwykPointsDB) == "table" and ZwykPointsDB or {}
-    ZwykPointsDB, self.DB = db, db
+    local db = type(ZwykValuesDB) == "table" and ZwykValuesDB or {}
+    ZwykValuesDB, self.DB = db, db
     db.schemaVersion = 1
     db.profiles = type(db.profiles) == "table" and db.profiles or {}
     db.profileOrder = type(db.profileOrder) == "table" and db.profileOrder or {}
@@ -299,14 +300,14 @@ function FW:ImportProfile(source, fallbackName)
     self:Initialize()
     local decoded, errorMessage = self.JSON.Decode(source)
     if decoded == nil then return nil, errorMessage end
-    if not plainObject(decoded) then return nil, "Import must be a weight object or a ZwykPoints profile object." end
+    if not plainObject(decoded) then return nil, "Import must be a weight object or a ZwykValues profile object." end
     local weights, name, color, unit
     local warnings = {}
     if decoded.weights ~= nil or decoded.format ~= nil then
         local allowed = { format = true, version = true, name = true, color = true, secondaryUnit = true, weights = true }
         for key in pairs(decoded) do if not allowed[key] then return nil, "Unknown profile field '" .. key .. "'." end end
-        if decoded.format ~= "ZwykPoints" and decoded.format ~= "ForeverWeights" then
-            return nil, "Profile format must be 'ZwykPoints' or the legacy 'ForeverWeights'."
+        if decoded.format ~= "ZwykValues" and decoded.format ~= "ZwykPoints" and decoded.format ~= "ForeverWeights" then
+            return nil, "Profile format must be 'ZwykValues', 'ZwykPoints' or 'ForeverWeights'."
         end
         if decoded.version ~= 1 then return nil, "Unsupported profile version (expected 1)." end
         weights, errorMessage = validWeights(decoded.weights)
@@ -341,7 +342,7 @@ function FW:ExportProfile(id, bare)
     local weights = cloneWeights(profile.weights)
     if bare then return self.JSON.Encode(weights) end
     return self.JSON.Encode({
-        format = "ZwykPoints", version = 1, name = profile.name,
+        format = "ZwykValues", version = 1, name = profile.name,
         color = { r = profile.color.r, g = profile.color.g, b = profile.color.b },
         secondaryUnit = profile.secondaryUnit, weights = weights,
     })

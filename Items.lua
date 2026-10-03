@@ -124,7 +124,7 @@ local function tooltipLines(link)
     end
     if not CreateFrame then return lines, nil end
     if not scanner then
-        local ok, frame = pcall(CreateFrame, "GameTooltip", "ZwykPointsScanTooltip", UIParent, "GameTooltipTemplate")
+        local ok, frame = pcall(CreateFrame, "GameTooltip", "ZwykValuesScanTooltip", UIParent, "GameTooltipTemplate")
         if ok then scanner = frame; FW.ScanTooltip = frame end
     end
     if not scanner then return lines, nil end
@@ -133,8 +133,8 @@ local function tooltipLines(link)
     local ok = pcall(scanner.SetHyperlink, scanner, link)
     if ok then
         for i = 1, scanner:NumLines() do
-            local left = _G["ZwykPointsScanTooltipTextLeft" .. i]
-            local right = _G["ZwykPointsScanTooltipTextRight" .. i]
+            local left = _G["ZwykValuesScanTooltipTextLeft" .. i]
+            local right = _G["ZwykValuesScanTooltipTextRight" .. i]
             local leftText = left and clean(left:GetText()) or ""
             local rightText = right and clean(right:GetText()) or ""
             if leftText ~= "" then lines[#lines + 1] = leftText end

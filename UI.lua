@@ -274,7 +274,7 @@ local function confirmDelete()
         status("The game's confirmation dialog is unavailable.", "error")
         return
     end
-    StaticPopupDialogs.ZWYKPOINTS_DELETE_PROFILE = StaticPopupDialogs.ZWYKPOINTS_DELETE_PROFILE or {
+    StaticPopupDialogs.ZWYKVALUES_DELETE_PROFILE = StaticPopupDialogs.ZWYKVALUES_DELETE_PROFILE or {
         text = 'Delete weight profile "%s"?',
         button1 = DELETE or "Delete", button2 = CANCEL or "Cancel",
         OnAccept = function(_, data)
@@ -282,7 +282,7 @@ local function confirmDelete()
         end,
         timeout = 0, whileDead = true, hideOnEscape = true, preferredIndex = 3,
     }
-    StaticPopup_Show("ZWYKPOINTS_DELETE_PROFILE", profile.name, nil, { profileID = profile.id })
+    StaticPopup_Show("ZWYKVALUES_DELETE_PROFILE", profile.name, nil, { profileID = profile.id })
 end
 
 local function createJSONDialog()
@@ -308,7 +308,7 @@ local function createJSONDialog()
     local inset = panel(dialog)
     inset:SetPoint("TOPLEFT", 16, -112)
     inset:SetPoint("BOTTOMRIGHT", -16, 66)
-    dialog.scroll = CreateFrame("ScrollFrame", "ZwykPointsJSONScroll", inset, "UIPanelScrollFrameTemplate")
+    dialog.scroll = CreateFrame("ScrollFrame", "ZwykValuesJSONScroll", inset, "UIPanelScrollFrameTemplate")
     dialog.scroll:SetPoint("TOPLEFT", 8, -8)
     dialog.scroll:SetPoint("BOTTOMRIGHT", -29, 8)
     dialog.text = CreateFrame("EditBox", nil, dialog.scroll)
@@ -384,7 +384,7 @@ local function showJSON(mode)
     dialog.message:SetText("")
     if mode == "import" then
         dialog.title:SetText("Import a weight profile")
-        dialog.help:SetText("Paste a Sixty Upgrades weights object, a ZwykPoints profile, or a legacy ForeverWeights profile. A bare weights object uses percent mode; choose its unit after importing.")
+        dialog.help:SetText("Paste a Sixty Upgrades weights object, a ZwykValues profile, or a legacy ZwykPoints/ForeverWeights profile. A bare weights object uses percent mode; choose its unit after importing.")
         dialog.nameLabel:Show()
         dialog.name:Show()
         dialog.name:SetText(uniqueName("Imported profile"))
@@ -556,7 +556,7 @@ end
 
 local function createUI()
     UI = { rows = {}, fields = {}, profileControls = {} }
-    local frame = CreateFrame("Frame", "ZwykPointsFrame", UIParent, BackdropTemplateMixin and "BackdropTemplate" or nil)
+    local frame = CreateFrame("Frame", "ZwykValuesFrame", UIParent, BackdropTemplateMixin and "BackdropTemplate" or nil)
     UI.frame = frame
     FW.UI = frame
     frame:SetSize(930, 720)
@@ -572,7 +572,7 @@ local function createUI()
     frame:SetScript("OnDragStart", function(self) self:StartMoving() end)
     frame:SetScript("OnDragStop", function(self) self:StopMovingOrSizing() end)
     backdrop(frame)
-    label(frame, "ZwykPoints", 21, { 1, 0.82, 0.35 }):SetPoint("TOPLEFT", 21, -19)
+    label(frame, "ZwykValues", 21, { 1, 0.82, 0.35 }):SetPoint("TOPLEFT", 21, -19)
     label(frame, "Item scores from your own stat weights", 12, { 0.69, 0.77, 0.87 }):SetPoint("TOPLEFT", 22, -46)
     local close = CreateFrame("Button", nil, frame, "UIPanelCloseButton")
     close:SetPoint("TOPRIGHT", -3, -3)
@@ -585,14 +585,14 @@ local function createUI()
     resize:SetPushedTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Down")
     resize:SetScript("OnMouseDown", function(_, mouseButton) if mouseButton == "LeftButton" then frame:StartSizing("BOTTOMRIGHT") end end)
     resize:SetScript("OnMouseUp", function() frame:StopMovingOrSizing() end)
-    if UISpecialFrames then table.insert(UISpecialFrames, "ZwykPointsFrame") end
+    if UISpecialFrames then table.insert(UISpecialFrames, "ZwykValuesFrame") end
 
     UI.left = panel(frame)
     UI.left:SetPoint("TOPLEFT", 18, -71)
     UI.left:SetPoint("BOTTOMLEFT", 18, 90)
     UI.left:SetWidth(220)
     label(UI.left, "Profiles", 13, { 1, 0.82, 0.35 }):SetPoint("TOPLEFT", 12, -13)
-    UI.profileScroll = CreateFrame("ScrollFrame", "ZwykPointsProfilesScroll", UI.left, "UIPanelScrollFrameTemplate")
+    UI.profileScroll = CreateFrame("ScrollFrame", "ZwykValuesProfilesScroll", UI.left, "UIPanelScrollFrameTemplate")
     UI.profileScroll:SetPoint("TOPLEFT", 9, -38)
     UI.profileScroll:SetPoint("BOTTOMRIGHT", -30, 47)
     UI.profileContent = CreateFrame("Frame", nil, UI.profileScroll)
@@ -676,7 +676,7 @@ local function createUI()
     UI.editorTitle:SetPoint("TOPLEFT", 15, -165)
     UI.editorTitle:SetPoint("TOPRIGHT", -15, -165)
     UI.editorTitle:SetHeight(20)
-    UI.weightsScroll = CreateFrame("ScrollFrame", "ZwykPointsStatsScroll", UI.right, "UIPanelScrollFrameTemplate")
+    UI.weightsScroll = CreateFrame("ScrollFrame", "ZwykValuesStatsScroll", UI.right, "UIPanelScrollFrameTemplate")
     UI.weightsScroll:SetPoint("TOPLEFT", 12, -193)
     UI.weightsScroll:SetPoint("BOTTOMRIGHT", -33, 51)
     UI.weightContent = CreateFrame("Frame", nil, UI.weightsScroll)
@@ -818,7 +818,7 @@ function FW:ShowTextDialog(title, text, importMode)
     if not UI.dialog then createJSONDialog() end
     local dialog = UI.dialog
     dialog.mode = "text"
-    dialog.title:SetText(title or "ZwykPoints")
+    dialog.title:SetText(title or "ZwykValues")
     dialog.help:SetText("Select all, then press Ctrl+C to copy this text.")
     dialog.nameLabel:Hide()
     dialog.name:Hide()

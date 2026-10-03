@@ -4,7 +4,7 @@ GetInventoryItemLink = function(_, slot) return equipped[slot] end
 GetItemInfo = function(link) return "item",link,1,1,1,"Weapon","Sword",1,types[link] end
 CanDualWield = function() return true end
 function FW:GetScore(link) return scores[link], records[link] or "Loading" end
-assert(loadfile("Compare.lua"))("ZwykPoints",FW)
+assert(loadfile("Compare.lua"))("ZwykValues",FW)
 local function item(link, equipLoc, score)
     records[link]={equipLoc=equipLoc}; scores[link]=score; types[link]=equipLoc
 end

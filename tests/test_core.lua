@@ -1,9 +1,9 @@
 -- Run from the addon directory: lua tests/test_core.lua .
 local addonPath = (arg and arg[1]) or "."
 local FW = {}
-assert(loadfile(addonPath .. "/JSON.lua"))("ZwykPoints", FW)
-assert(loadfile(addonPath .. "/Stats.lua"))("ZwykPoints", FW)
-assert(loadfile(addonPath .. "/Core.lua"))("ZwykPoints", FW)
+assert(loadfile(addonPath .. "/JSON.lua"))("ZwykValues", FW)
+assert(loadfile(addonPath .. "/Stats.lua"))("ZwykValues", FW)
+assert(loadfile(addonPath .. "/Core.lua"))("ZwykValues", FW)
 
 local passed = 0
 local function check(value, message)
@@ -17,7 +17,7 @@ local function contains(value, pattern)
     check(type(value) == "string" and value:find(pattern, 1, true), "Expected error containing '" .. pattern .. "', got " .. tostring(value))
 end
 local function reset()
-    ZwykPointsDB, ForeverWeightsDB, FW.DB = nil, nil, nil
+    ZwykValuesDB, ZwykPointsDB, ForeverWeightsDB, FW.DB = nil, nil, nil, nil
     FW:Initialize()
 end
 
@@ -87,24 +87,26 @@ equal(imported.name, "Imported")
 check(#warnings > 0, "bare imports explain unit assumptions")
 assert(FW:UpdateProfile(profile.id, { secondaryUnit = "rating", active = false }))
 local envelope = assert(FW:ExportProfile(profile.id))
-equal(assert(json.Decode(envelope)).format, "ZwykPoints", "new exports use the renamed format")
+equal(assert(json.Decode(envelope)).format, "ZwykValues", "new exports use the renamed format")
 local restored = assert(FW:ImportProfile(envelope))
 equal(restored.name, profile.name)
 equal(restored.secondaryUnit, "rating")
 equal(restored.color.r, 1)
-local legacyEnvelope = envelope:gsub('"format":"ZwykPoints"', '"format":"ForeverWeights"')
-local legacy = assert(FW:ImportProfile(legacyEnvelope))
-equal(legacy.name, profile.name, "legacy profile names are preserved")
-equal(legacy.weights.strength, 3, "legacy profile weights are preserved")
-equal(legacy.secondaryUnit, "rating", "legacy profile units are preserved")
-equal(legacy.color.r, 1, "legacy profile colors are preserved")
-equal(assert(json.Decode(assert(FW:ExportProfile(legacy.id)))).format, "ZwykPoints", "legacy imports re-export with the new format")
+for _, legacyFormat in ipairs({ "ZwykPoints", "ForeverWeights" }) do
+    local legacyEnvelope = envelope:gsub('"format":"ZwykValues"', '"format":"' .. legacyFormat .. '"')
+    local legacy = assert(FW:ImportProfile(legacyEnvelope))
+    equal(legacy.name, profile.name, "legacy profile names are preserved")
+    equal(legacy.weights.strength, 3, "legacy profile weights are preserved")
+    equal(legacy.secondaryUnit, "rating", "legacy profile units are preserved")
+    equal(legacy.color.r, 1, "legacy profile colors are preserved")
+    equal(assert(json.Decode(assert(FW:ExportProfile(legacy.id)))).format, "ZwykValues", "legacy imports re-export with the new format")
+end
 local empty = assert(FW:ImportProfile("{}", "Empty"))
 equal(FW:ScoreStats(empty, { strength = 100 }), 0)
 local badImports = {
     '[]', 'null', 'false', '{"spellingMistake":1}', '{"strength":null}', '{"strength":"2"}',
-    '{"format":"ZwykPoints","version":2,"weights":{}}',
-    '{"format":"ZwykPoints","version":1,"weights":{},"secondaryUnit":"guessed"}',
+    '{"format":"ZwykValues","version":2,"weights":{}}',
+    '{"format":"ZwykValues","version":1,"weights":{},"secondaryUnit":"guessed"}',
 }
 for _, source in ipairs(badImports) do
     local count = #FW:GetProfiles()
@@ -130,7 +132,7 @@ check(FW:ExportProfile(longCopy.id), "copying a long Unicode name does not split
 local legacyDB = FW.DB
 legacyDB.options.debugUnknownStats = true
 local legacyProfile = legacyDB.profiles[profile.id]
-ForeverWeightsDB, ZwykPointsDB, FW.DB = legacyDB, nil, nil
+ForeverWeightsDB, ZwykValuesDB, FW.DB = legacyDB, nil, nil
 FW:Initialize()
 check(FW.DB ~= legacyDB, "legacy migration creates an independent database")
 check(FW.DB.profiles[profile.id] ~= legacyProfile, "migrated profiles are independent")
@@ -144,8 +146,21 @@ equal(legacyProfile.color.r, 1, "migrated edits do not modify the old colors")
 local migratedDB = FW.DB
 FW.DB = nil
 FW:Initialize()
-equal(FW.DB, migratedDB, "an existing ZwykPoints database takes precedence over legacy data")
+equal(FW.DB, migratedDB, "an existing ZwykValues database takes precedence over legacy data")
 equal(FW.DB.profiles[profile.id].weights.strength, 42, "reinitializing does not reimport legacy weights")
+
+-- The immediately previous addon database takes precedence over the original.
+ZwykPointsDB, ZwykValuesDB, FW.DB = migratedDB, nil, nil
+FW:Initialize()
+check(FW.DB ~= ZwykPointsDB, "ZwykPoints migration creates an independent database")
+equal(FW.DB.profiles[profile.id].weights.strength, 42, "ZwykPoints takes precedence over ForeverWeights")
+check(FW.DB.options ~= ZwykPointsDB.options, "migrated options are independent")
+check(FW.DB.cache ~= ZwykPointsDB.cache, "migrated cache is independent")
+assert(FW:UpdateProfile(profile.id, { weights = { strength = 50 } }))
+equal(ZwykPointsDB.profiles[profile.id].weights.strength, 42, "migrated edits do not modify ZwykPoints weights")
+FW.DB = nil
+FW:Initialize()
+equal(FW.DB.profiles[profile.id].weights.strength, 50, "existing ZwykValues takes precedence over both legacy databases")
 
 reset()
 local records, itemReads, scoreCalls = {}, 0, 0

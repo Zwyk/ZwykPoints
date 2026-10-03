@@ -79,13 +79,13 @@ GameTooltip=tooltip("GameTooltip","item:100")
 ItemRefTooltip=tooltip("ItemRefTooltip","item:101")
 ShoppingTooltip1=tooltip("ShoppingTooltip1","item:102")
 ShoppingTooltip2=tooltip("ShoppingTooltip2","item:103")
-FW.ScanTooltip=tooltip("ZwykPointsScanTooltip","item:104")
+FW.ScanTooltip=tooltip("ZwykValuesScanTooltip","item:104")
 local postCall
 TooltipDataProcessor={AddTooltipPostCall=function(kind, fn)
     assert(kind==1); calls.post=calls.post+1; postCall=fn
 end}
 Enum={TooltipDataType={Item=1}}
-assert(loadfile("Tooltips.lua"))("ZwykPoints",FW)
+assert(loadfile("Tooltips.lua"))("ZwykValues",FW)
 FW:InstallTooltipHooks()
 assert(calls.post==1)
 assert(GameTooltip.fwHooked and not FW.ScanTooltip.fwHooked)
@@ -183,21 +183,21 @@ local debugTip=tooltip("DebugTooltip","item:600")
 debugTip:AddLine("Mystery armor")
 debugTip:AddLine("Equip: Grants +17 Mystery.")
 FW:MarkUnknownStats(debugTip,record)
-assert(not debugTip.lines[2].text:find("[ZP ?]",1,true))
+assert(not debugTip.lines[2].text:find("[ZV ?]",1,true))
 FW.DB.options.debugUnknownStats=true
 FW:MarkUnknownStats(debugTip,record)
 local marked=debugTip.lines[2].text
 FW:MarkUnknownStats(debugTip,record)
-assert(marked:find("[ZP ?]",1,true) and debugTip.lines[2].text==marked)
+assert(marked:find("[ZV ?]",1,true) and debugTip.lines[2].text==marked)
 local french=tooltip("FrenchDebugTooltip","item:601")
 french:AddLine("Armure mystère")
 french:AddLine("Équipé\194\160: Bonus mystère de 17.")
 FW:MarkUnknownStats(french,{unrecognizedLines={{text="Équipé : Bonus mystère de 17."}}})
-assert(french.lines[2].text:find("[ZP ?]",1,true))
+assert(french.lines[2].text:find("[ZV ?]",1,true))
 profiles={}
 debugTip:Clear(); debugTip:AddLine("Mystery armor"); debugTip:AddLine("Equip: Grants +17 Mystery.")
 postCall(debugTip,{hyperlink="item:600"})
-assert(#debugTip.lines==2 and debugTip.lines[2].text:find("[ZP ?]",1,true))
+assert(#debugTip.lines==2 and debugTip.lines[2].text:find("[ZV ?]",1,true))
 postCall(debugTip,{hyperlink="item:600"})
 assert(debugTip.lines[2].text==marked)
 
