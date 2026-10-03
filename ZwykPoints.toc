@@ -1,0 +1,15 @@
+## Interface: 16000
+## Title: ZwykPoints
+## Notes: Custom stat-weight profiles, cached item scores, and equipped comparisons for WoW Forever.
+## Author: Felix
+## Version: 0.1.1
+## SavedVariables: ZwykPointsDB
+
+JSON.lua
+Stats.lua
+Core.lua
+Items.lua
+Compare.lua
+Tooltips.lua
+UI.lua
+Bootstrap.lua
