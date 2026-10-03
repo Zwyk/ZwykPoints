@@ -6,17 +6,21 @@ local itemDB={
     ["item:101:0:0:0:0:0:0:0:60"]={name="Old helmet",strength=8,crit=1,equipLoc="INVTYPE_HEAD"},
     ["item:100:0:0:0:0:0:-7:123:60"]={name="Variant helmet",strength=15,crit=1,equipLoc="INVTYPE_HEAD"},
     ["item:102:0:0:0:0:0:0:0:60"]={name="Scanner helmet",strength=4,crit=1,equipLoc="INVTYPE_HEAD"},
+    ["item:103:0:0:0:0:0:0:0:60"]={name="Partial helmet",strength=12,crit=1,equipLoc="INVTYPE_HEAD",unknown=3},
 }
 local candidate="item:100:0:0:0:0:0:0:0:60"
 local baseline="item:101:0:0:0:0:0:0:0:60"
 local variant="item:100:0:0:0:0:0:-7:123:60"
 local scanned="item:102:0:0:0:0:0:0:0:60"
+local partial="item:103:0:0:0:0:0:0:0:60"
 local reads,scans,scoreCalls=0,0,0
 local function definition(link) return assert(itemDB[link],"Unexpected item " .. tostring(link)) end
 local function sourceLines(link)
     local item=definition(link)
-    return {item.name,"+" .. item.strength .. " Strength",
+    local lines = {item.name,"+" .. item.strength .. " Strength",
         "Equip: Increases your chance to get a critical strike by " .. item.crit .. "%."}
+    if item.unknown then lines[#lines+1]="+" .. item.unknown .. " Mystic Focus" end
+    return lines
 end
 GetBuildInfo=function() return "16.0.0","65000","Oct 1 2026",160000 end
 GetLocale=function() return "enUS" end
@@ -32,7 +36,9 @@ C_Item={
     GetItemStats=function(link)
         reads=reads+1
         local item=definition(link)
-        return {ITEM_MOD_STRENGTH_SHORT=item.strength,ITEM_MOD_CRIT_SHORT=item.crit}
+        local stats = {ITEM_MOD_STRENGTH_SHORT=item.strength,ITEM_MOD_CRIT_SHORT=item.crit}
+        if item.unknown then stats.ITEM_MOD_FOREVER_FOCUS_SHORT=item.unknown end
+        return stats
     end,
     IsItemDataCachedByID=function() return true end,
 }
@@ -101,9 +107,9 @@ assert(reads==2 and scans==2 and scoreCalls==4)
 local function findLine(text)
     for _,line in ipairs(GameTooltip.lines) do if line.left==text then return line end end
 end
-assert(findLine("Melee").right=="30.00" and findLine("Caster").right=="5.00")
-assert(findLine("  Head: +4.00 (+15.4%) upgrade"))
-assert(findLine("  Head: +0.00 (+0.0%) equal"))
+assert(findLine("Melee").right=="30.00 |cff40ff59↑+4.00 (+15.4%)|r")
+assert(findLine("Caster").right=="5.00 |cffb2b2b2=0.00 (+0.0%)|r")
+assert(not findLine("ZwykValues"), "Tooltip should not add an addon header")
 local lineCount=#GameTooltip.lines
 GameTooltip:Fire("OnTooltipSetItem")
 assert(#GameTooltip.lines==lineCount and scoreCalls==4)
@@ -114,10 +120,33 @@ assert(reads==2 and scans==2 and scoreCalls==4)
 assert(FW:UpdateProfile(one.id,{weights={strength=3}}))
 GameTooltip:SetHyperlink(candidate)
 assert(reads==2 and scans==2 and scoreCalls==6)
-assert(findLine("Melee").right=="40.00")
+assert(findLine("Melee").right=="40.00 |cff40ff59↑+6.00 (+17.6%)|r")
 assert(FW:GetScore(variant,one)==55)
 assert(reads==3 and scans==3 and scoreCalls==7)
 assert(FW:GetScore(candidate,one)==40 and scoreCalls==7)
+
+-- A genuinely partial item still shows both profile subtotals, one warning,
+-- and a complete aggregate diagnostic entry, even with inline debugging off.
+GameTooltip:SetHyperlink(partial)
+assert(findLine("Melee").right=="46.00 |cff40ff59↑+12.00 (+35.3%)|r")
+assert(findLine("Caster").right=="5.00 |cffb2b2b2=0.00 (+0.0%)|r")
+local warningCount=0
+for _,line in ipairs(GameTooltip.lines) do
+    if line.left:find("Partial stat data",1,true) then warningCount=warningCount+1 end
+end
+assert(warningCount==1, "One shared warning should cover all active profiles")
+local report=assert(FW.JSON.Decode(assert(FW.JSON.Encode(FW:GetIssueReport()))))
+assert(report.itemCount==1 and report.items[1].raw.ITEM_MOD_FOREVER_FOCUS_SHORT==3)
+assert(report.items[1].profileScores[one.id].score==46 and report.items[1].profileScores[two.id].score==5)
+assert(not FW.DB.cache.items[FW:ItemKey(partial)] and not FW.DB.cache.scores[FW:ItemKey(partial)])
+
+-- A complete candidate still warns when its equipped comparison is partial.
+local oldBaseline=baseline
+baseline=partial
+GameTooltip:SetHyperlink(candidate)
+assert(findLine("Melee").right=="40.00 |cffff5959↓-6.00 (-13.0%)|r")
+assert(findLine("Partial stat data; /zv inspect or /zv exportissues."))
+baseline=oldBaseline
 
 -- The actual legacy scanner must be excluded before SetHyperlink invokes hooks.
 C_TooltipInfo=nil

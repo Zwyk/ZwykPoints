@@ -42,6 +42,7 @@ function FW:CompareItem(link, profile)
     local score, record = self:GetScore(link, profile)
     if score == nil then return nil, record end
     local result = {score=score, record=record, comparisons={}}
+    result.hasIssues = (self.ItemHasIssues and self:ItemHasIssues(record, profile)) or record.partial
     local equipLoc = record.equipLoc
     local mainType = inventoryType(inventoryLink(16))
     if (equipLoc == "INVTYPE_SHIELD" or equipLoc == "INVTYPE_HOLDABLE" or
@@ -68,8 +69,11 @@ function FW:CompareItem(link, profile)
             local equipped = inventoryLink(slot)
             if equipped then
                 comparison.links[#comparison.links+1] = equipped
-                local equippedScore, err = self:GetScore(equipped, profile)
-                if equippedScore == nil then comparison.error = tostring(err); break end
+                local equippedScore, equippedRecord = self:GetScore(equipped, profile)
+                if equippedScore == nil then comparison.error = tostring(equippedRecord); break end
+                if (self.ItemHasIssues and self:ItemHasIssues(equippedRecord, profile)) or equippedRecord.partial then
+                    comparison.hasIssues, result.hasIssues = true, true
+                end
                 comparison.baseline = comparison.baseline + equippedScore
             end
         end

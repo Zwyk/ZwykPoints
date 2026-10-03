@@ -28,8 +28,11 @@ function FW:ToggleUI() counts.ui=counts.ui+1 end
 function FW:GetItem(link)
     return {stats={strength=10},percentStats={crit=1},ratingStats={},warnings={},unresolvedStats={}}
 end
+function FW:GetIssueReport() return {itemCount=1,items={{itemID=777}}} end
+function FW:ClearItemIssues() counts.clearIssues=(counts.clearIssues or 0)+1 end
 function FW:ShowTextDialog(title,text,editable)
-    assert(title=="Item diagnostics" and text=="diagnostics" and editable==false)
+    assert((title=="Item diagnostics" or title=="Item issues (1)") and text=="diagnostics" and editable==false)
+    counts.dialogTitle=title
     counts.dialog=(counts.dialog or 0)+1
 end
 assert(loadfile("Bootstrap.lua"))("ZwykValues",FW)
@@ -78,4 +81,8 @@ SlashCmdList.ZWYKVALUES("inspect item:777")
 assert(counts.dialog==1 and FW.lastEncoded.item=="item:777" and FW.lastEncoded.locale=="enUS")
 SlashCmdList.ZWYKVALUES("inspect")
 assert(messages[#messages]:find("Hover an item",1,true))
+SlashCmdList.ZWYKVALUES("exportissues")
+assert(counts.dialog==2 and counts.dialogTitle=="Item issues (1)" and FW.lastEncoded.items[1].itemID==777)
+SlashCmdList.ZWYKVALUES("clearissues")
+assert(counts.clearIssues==1 and counts.invalidate==2, "Clearing issue history must not clear the score cache")
 print("Bootstrap tests passed")

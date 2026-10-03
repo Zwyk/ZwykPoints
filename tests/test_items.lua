@@ -33,9 +33,13 @@ local function newReader(item)
     }
     CreateFrame = nil
     RETRIEVING_ITEM_INFO, RETRIEVING_DATA = "Retrieving item information", "Retrieving data"
-    local FW = { DB = { cache = { items = {}, itemOrder = {}, scores = {} } } }
+    ZwykValuesDB, ZwykPointsDB, ForeverWeightsDB = nil, nil, nil
+    local FW = {}
+    assert(loadfile(source .. "JSON.lua"))("ZwykValues", FW)
     assert(loadfile(source .. "Stats.lua"))("ZwykValues", FW)
+    assert(loadfile(source .. "Core.lua"))("ZwykValues", FW)
     assert(loadfile(source .. "Items.lua"))("ZwykValues", FW)
+    FW:Initialize()
     return FW
 end
 
@@ -147,6 +151,21 @@ equal(item.partial, true)
 equal(#item.unrecognizedLines, 3)
 equal(item.unrecognizedLines[1].text, "+3 Strength and +1% Dodge")
 equal(next(FW.DB.cache.items), nil, "incomplete extraction is not persisted")
+equal(FW:GetIssueReport().itemCount, 1, "issue item is persisted independently of the normal cache")
+local journal = FW:GetIssueReport().items[1]
+equal(journal.name, "Test Item")
+equal(journal.raw.ITEM_MOD_FUTURE_SHORT, 10)
+equal(journal.tooltipLines[2], "+3 Strength and +1% Dodge")
+equal(journal.tooltipDetails[2].leftText, "+3 Strength and +1% Dodge")
+equal(journal.tooltipSource, "C_TooltipInfo")
+equal(journal.source, "C_Item.GetItemStats")
+equal(journal.build.build, "12345")
+equal(journal.locale, "enUS")
+equal(journal.stats.strength, 3)
+FW:GetItem("item:109")
+equal(FW:GetIssueReport().itemCount, 1, "repeated reads update one diagnostic entry per variant")
+FW:GetItem("item:109:1")
+equal(FW:GetIssueReport().itemCount, 2, "item variants receive distinct diagnostic entries")
 local diagnostic = assert(FW:GetRawItemStats("item:109"))
 equal(diagnostic.unknownKeys[1], "ITEM_MOD_FUTURE_SHORT")
 assert(FW:IsPotentialStatLine("+4 Unknown stat"))
@@ -212,5 +231,49 @@ FW = newReader({ raw = {}, lines = { "Test Item", "Équipé : Réduit les chance
 locale = "frFR"
 item = assert(FW:GetItem("item:119"))
 equal(item.percentStats.expertise, 1.5)
+
+FW = newReader({ raw = { ITEM_MOD_STRENGTH_SHORT = 0 / 0,
+    ITEM_MOD_FUTURE_SHORT = function() end, [1] = math.huge, [false] = "Unexpected key" }, lines = { "Test Item", "+2 Strength" } })
+item = assert(FW:GetItem("item:120"))
+local badAPIProfile = assert(FW:CreateProfile("Known subtotal", { strength = 2 }))
+equal(FW:GetScore("item:120", badAPIProfile), 4, "known tooltip values remain usable after an invalid API value")
+local exported = assert(FW.JSON.Encode(FW:GetIssueReport()))
+local exportedReport = assert(FW.JSON.Decode(exported))
+equal(exportedReport.items[1].raw.ITEM_MOD_STRENGTH_SHORT, "[non-finite number]", "invalid raw values cannot break combined export")
+equal(exportedReport.items[1].raw.ITEM_MOD_FUTURE_SHORT, "[function value unavailable]")
+equal(exportedReport.items[1].raw["1"], "[non-finite number]")
+equal(exportedReport.items[1].raw["false"], "Unexpected key", "unexpected API key types are still exportable")
+equal(exportedReport.items[1].profileScores[badAPIProfile.id].score, 4)
+equal(FW:GetIssueReport().itemCount, 1)
+FW:InvalidateCache()
+equal(FW:GetIssueReport().itemCount, 1, "debug export survives explicit score-cache clearing")
+local preservedDB = FW.DB
+FW.DB = nil
+FW:Initialize()
+equal(FW.DB, preservedDB)
+equal(FW:GetIssueReport().itemCount, 1, "diagnostics persist through reinitialization")
+
+FW = newReader({ raw = { ITEM_MOD_HIT_RATING_SHORT = 12 }, lines = { "Test Item", "Hit Rating +12" } })
+local mismatchProfile = assert(FW:CreateProfile("Percent", { hit = 5 }))
+item = assert(FW:GetItem("item:121"))
+equal(item.partial, false, "native rating extraction remains valid")
+equal(FW:GetIssueReport().itemCount, 0, "valid native ratings are not automatically parser failures")
+local mismatchScore, mismatchRecord, mismatchWarning = FW:GetScore("item:121", mismatchProfile)
+equal(mismatchScore, 0)
+assert(mismatchWarning:find("percentage points", 1, true))
+equal(mismatchRecord.partial, false)
+assert(FW:ItemHasIssues(mismatchRecord, mismatchProfile))
+equal(FW:GetIssueReport().itemCount, 1, "unit-specific scoring failures are also exportable")
+assert(FW.JSON.Encode(FW:GetIssueReport()))
+
+local protected = setmetatable({}, { __tostring = function() error("secret value must not be stringified") end })
+issecretvalue = function(value) return value == protected end
+FW = newReader({ raw = { ITEM_MOD_STRENGTH_SHORT = protected, [protected] = 8 },
+    lines = { "Test Item", "+5 Strength" } })
+item = assert(FW:GetItem("item:122"))
+local secretReport = assert(FW.JSON.Decode(assert(FW.JSON.Encode(FW:GetIssueReport()))))
+equal(secretReport.items[1].raw.ITEM_MOD_STRENGTH_SHORT, "[secret value unavailable]")
+equal(secretReport.items[1].raw["[secret key unavailable]"], 8)
+issecretvalue = nil
 
 print("Items tests passed")

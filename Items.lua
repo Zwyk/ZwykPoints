@@ -1,5 +1,5 @@
 local _, FW = ...
-local MAX_ITEMS, PARSER_VERSION = 2000, 1
+local MAX_ITEMS, PARSER_VERSION = 2000, 2
 
 local function number(value)
     if issecretvalue and issecretvalue(value) then return nil end
@@ -107,27 +107,34 @@ end
 local function warn(record, message)
     record.warnings[#record.warnings + 1] = message
 end
+local function apiKeyText(key)
+    if issecretvalue and issecretvalue(key) then return "[secret API key unavailable]" end
+    if type(key) == "string" or type(key) == "number" or type(key) == "boolean" then return tostring(key) end
+    return "[" .. type(key) .. " API key unavailable]"
+end
 
 local scanner
 local function tooltipLines(link)
-    local lines = {}
+    local lines, details = {}, {}
     if C_TooltipInfo and C_TooltipInfo.GetHyperlink then
         local ok, data = pcall(C_TooltipInfo.GetHyperlink, link)
         if ok and type(data) == "table" and type(data.lines) == "table" then
-            for _, line in ipairs(data.lines) do
+            for index, line in ipairs(data.lines) do
                 local left, right = clean(line.leftText), clean(line.rightText)
+                details[#details + 1] = { index = index, leftText = line.leftText,
+                    rightText = line.rightText, type = line.type }
                 if left ~= "" then lines[#lines + 1] = left end
                 if right ~= "" and right ~= left then lines[#lines + 1] = right end
             end
-            if #lines > 0 then return lines, "C_TooltipInfo" end
+            if #lines > 0 then return lines, "C_TooltipInfo", details end
         end
     end
-    if not CreateFrame then return lines, nil end
+    if not CreateFrame then return lines, nil, details end
     if not scanner then
         local ok, frame = pcall(CreateFrame, "GameTooltip", "ZwykValuesScanTooltip", UIParent, "GameTooltipTemplate")
         if ok then scanner = frame; FW.ScanTooltip = frame end
     end
-    if not scanner then return lines, nil end
+    if not scanner then return lines, nil, details end
     scanner:SetOwner(UIParent, "ANCHOR_NONE")
     scanner:ClearLines()
     local ok = pcall(scanner.SetHyperlink, scanner, link)
@@ -135,14 +142,15 @@ local function tooltipLines(link)
         for i = 1, scanner:NumLines() do
             local left = _G["ZwykValuesScanTooltipTextLeft" .. i]
             local right = _G["ZwykValuesScanTooltipTextRight" .. i]
-            local leftText = left and clean(left:GetText()) or ""
-            local rightText = right and clean(right:GetText()) or ""
+            local rawLeft, rawRight = left and left:GetText(), right and right:GetText()
+            local leftText, rightText = clean(rawLeft), clean(rawRight)
+            details[#details + 1] = { index = i, leftText = rawLeft, rightText = rawRight }
             if leftText ~= "" then lines[#lines + 1] = leftText end
             if rightText ~= "" and rightText ~= leftText then lines[#lines + 1] = rightText end
         end
     end
     scanner:Hide()
-    return lines, #lines > 0 and "GameTooltip" or nil
+    return lines, #lines > 0 and "GameTooltip" or nil, details
 end
 
 local function requestItem(itemID)
@@ -157,6 +165,11 @@ function FW:GetRawItemStats(link)
     local itemID = payload and tonumber(payload:match("^item:(%d+)"))
     if not itemID then return nil, "Invalid item link." end
     local result = { itemID = itemID, raw = {}, unknownKeys = {}, ignoredKeys = {}, warnings = {}, ready = false }
+    local version, build, buildDate, interface = "unknown", "unknown", "unknown", "unknown"
+    if GetBuildInfo then version, build, buildDate, interface = GetBuildInfo() end
+    result.build = { version = version, build = build, date = buildDate, interface = interface }
+    result.locale = GetLocale and GetLocale() or "enUS"
+    result.level = UnitLevel and UnitLevel("player") or 0
     if C_Item and C_Item.IsItemDataCachedByID then
         local ok, cached = pcall(C_Item.IsItemDataCachedByID, itemID)
         if ok and not cached then requestItem(itemID); return result end
@@ -184,16 +197,17 @@ function FW:GetRawItemStats(link)
     result.raw = raw or {}
     result.apiAvailable = raw ~= nil
     for key in pairs(result.raw) do
-        if ignored[key] then result.ignoredKeys[#result.ignoredKeys + 1] = key
+        if issecretvalue and issecretvalue(key) then result.unknownKeys[#result.unknownKeys + 1] = apiKeyText(key)
+        elseif ignored[key] then result.ignoredKeys[#result.ignoredKeys + 1] = apiKeyText(key)
         elseif not absolute[key] and not ratings[key] and not untyped[key]
             and key ~= "ITEM_MOD_SPELL_POWER_SHORT" and key ~= "ITEM_MOD_SPELL_POWER"
             and key ~= "ITEM_MOD_DAMAGE_PER_SECOND_SHORT" and key ~= "ITEM_MOD_DAMAGE_PER_SECOND" then
-            result.unknownKeys[#result.unknownKeys + 1] = key
+            result.unknownKeys[#result.unknownKeys + 1] = apiKeyText(key)
         end
     end
     table.sort(result.unknownKeys)
     table.sort(result.ignoredKeys)
-    result.tooltipLines, result.tooltipSource = tooltipLines(link)
+    result.tooltipLines, result.tooltipSource, result.tooltipDetails = tooltipLines(link)
     result.ready = result.apiAvailable or #result.tooltipLines > 0
     for _, line in ipairs(result.tooltipLines) do
         local text = lower(clean(line))
@@ -512,8 +526,11 @@ function FW:GetItem(link)
     if not diagnostic.ready then return nil, "Item data is still loading." end
     local record = { key = key, link = diagnostic.link or link, itemID = diagnostic.itemID,
         equipLoc = diagnostic.equipLoc or "", stats = {}, percentStats = {}, ratingStats = {},
-        unresolvedStats = {}, unrecognizedLines = {}, warnings = {}, partial = false }
+        unresolvedStats = {}, unrecognizedLines = {}, warnings = {}, partial = false,
+        name = diagnostic.name, parserVersion = PARSER_VERSION,
+        diagnostic = self.CopyItemDiagnostic and self:CopyItemDiagnostic(diagnostic) or diagnostic }
     for rawKey, rawValue in pairs(diagnostic.raw) do
+        if issecretvalue and issecretvalue(rawKey) then rawKey = nil end
         local value = number(rawValue)
         if value == nil and (absolute[rawKey] or ratings[rawKey] or untyped[rawKey]) then
             local stat = absolute[rawKey] or ratings[rawKey] or untyped[rawKey]
@@ -580,6 +597,7 @@ function FW:GetItem(link)
     if record.stats.armor and record.stats.armorBonus then
         record.stats.armor = math.max(0, record.stats.armor - record.stats.armorBonus)
     end
+    if self.RecordItemIssue then self:RecordItemIssue(record) end
     if not record.partial then
         self.DB.cache.items[key] = record
         local order = self.DB.cache.itemOrder

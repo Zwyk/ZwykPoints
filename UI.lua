@@ -380,6 +380,7 @@ end
 local function showJSON(mode)
     if not UI.dialog then createJSONDialog() end
     local dialog = UI.dialog
+    dialog.text:SetMaxLetters(131072)
     dialog.mode = mode
     dialog.message:SetText("")
     if mode == "import" then
@@ -715,7 +716,7 @@ local function createUI()
     end
     UI.debugUnknown = option("Mark unrecognized stats", 340, "debugUnknownStats", false)
     UI.comparisons = option("Show upgrade comparisons", 590, "showComparisons", true)
-    hint(UI.debugUnknown, "Unrecognized stat diagnostics", "Adds a warning and the unrecognized lines to item tooltips when the stat reader cannot classify a relevant line.")
+    hint(UI.debugUnknown, "Unrecognized stat diagnostics", "Adds [ZV ?] next to unrecognized stat lines. Partial-data warnings and the issue log are available even when this option is off.")
     hint(UI.comparisons, "Item comparisons", "Show the flat score change and percentage upgrade or downgrade against equipped items for every active profile.")
     UI.status = label(frame, "", 11)
     UI.status:SetPoint("BOTTOMLEFT", 21, 44)
@@ -731,6 +732,9 @@ local function createUI()
     end)
     UI.clearCache:SetPoint("BOTTOMRIGHT", -29, 13)
     hint(UI.clearCache, "Clear local item cache", "Discards cached item stats and scores. Profiles and their weights are kept.")
+    UI.exportIssues = button(frame, "Export issues", 110, function() FW:ExportItemIssues() end)
+    UI.exportIssues:SetPoint("RIGHT", UI.clearCache, "LEFT", -8, 0)
+    hint(UI.exportIssues, "Export item diagnostics", "Copies JSON for every encountered item variant with parsing or stat-unit issues, including raw stats, tooltip lines and known scores. The log is saved between sessions. /zv clearissues resets it.")
     frame:SetScript("OnSizeChanged", function()
         UI.profileContent:SetWidth(math.max(100, UI.profileScroll:GetWidth()))
         layoutWeights()
@@ -824,6 +828,9 @@ function FW:ShowTextDialog(title, text, importMode)
     dialog.name:Hide()
     dialog.import:Hide()
     dialog.message:SetText("")
+    -- Diagnostics can contain every encountered issue item. Do not silently
+    -- truncate a large export at the profile editor's input limit.
+    dialog.text:SetMaxLetters(0)
     dialog.text:SetText(text or "")
     dialog:Show()
     dialog.scroll:SetVerticalScroll(0)

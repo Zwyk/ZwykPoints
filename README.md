@@ -1,4 +1,4 @@
-# ZwykValues 0.1.2
+# ZwykValues 0.1.3
 
 A standalone stat-weight addon written from scratch for WoW Forever. No Pawn code, Pawn dependency, third-party libraries, or online item database is required.
 
@@ -9,7 +9,7 @@ A standalone stat-weight addon written from scratch for WoW Forever. No Pawn cod
 3. Enable **ZwykValues** in the AddOns list. If the current beta lists it as out of date, enable **Load out of date AddOns**.
 4. Log in and type `/zv`.
 
-For a GitHub download, choose **Code → Download ZIP** in the repository, extract it, rename the unpacked repository folder (for example, `ZwykPoints-main`) to `ZwykValues`, and copy that folder into `Interface/AddOns`.
+For a GitHub download, choose **Code → Download ZIP** in the repository, extract it, rename the unpacked repository folder (for example, `ZwykValues-main`) to `ZwykValues`, and copy that folder into `Interface/AddOns`.
 
 The manifest targets interface `16000` (the 1.60 client family). This has not been confirmed against a running Forever client here. The active interface number can be checked with `/dump select(4, GetBuildInfo())` and substituted into the TOC if necessary.
 
@@ -52,7 +52,7 @@ Choose the unit explicitly:
 | `weaponDamage` | Weight per explicitly added flat weapon damage | Same |
 | `speed`, `rangedSpeed` | Weight per weapon swing second | Same |
 
-Merged melee/ranged/spell hit and crit aliases are counted once. The reader prefers explicit tooltip percentages for percentage profiles and keeps native API rating values separately. It does not apply an assumed rating conversion. A profile is marked unavailable when it needs a present secondary stat in a unit that the client did not expose. An actually absent stat contributes zero.
+Merged melee/ranged/spell hit and crit aliases are counted once. The reader prefers explicit tooltip percentages for percentage profiles and keeps native API rating values separately. It does not apply an assumed rating conversion. If a needed stat or secondary-stat unit is unavailable, the item still shows the subtotal from known values, accompanied by a partial-data warning. Unavailable amounts contribute zero to that subtotal; an actually absent stat also contributes zero. Check the diagnostics before trusting a partial comparison.
 
 `weaponDamage` is the explicit flat bonus (for example, `+1 Weapon Damage`), not the weapon's average base damage. To value average base damage, use half of the intended average-damage weight for both `lowDamage` and `highDamage`. JSON key compatibility is preserved, but all Sixty Upgrades field semantics have not been independently verified; check the units above when importing existing profiles.
 
@@ -60,17 +60,29 @@ English and French static tooltip text are supported, with localized Blizzard fo
 
 ## Tooltip comparisons
 
-Every active profile adds a colored score. Candidate items also show the signed point difference and percentage difference against equipped items:
+Every active profile adds one row with its name and score in the profile color. Candidate items show the signed point difference and percentage difference inline, with only the comparison fragment colored green for an increase, red for a decrease, or gray for equality:
+
+`Mageladin    2.56 ↑+1.52 (+146.2%)`
+
+The indicators are `↑`, `↓`, and `=`. Multiple replacement choices share the same row, in equipped slot order:
+
+`Mageladin    2.56 ↑+1.52 (+146.2%) | =0.00 (+0.0%)`
+
+Percentages use:
 
 `percentage = (candidate_score - equipped_score) / equipped_score * 100`
 
 Rings and trinkets show both replacement choices. A two-handed weapon is compared to the combined equipped main-hand and off-hand score. Generic one-handed weapons show an off-hand comparison only when dual wielding is available and the equipped main hand is compatible. A shield/off-hand item does not receive a misleading comparison against a two-handed main hand.
 
-An empty slot has score zero; a zero or negative baseline displays **percentage n/a**. Equipped and native shopping tooltips show the item score without recursively repeating candidate comparisons. The addon evaluates item stats, not whether your class can equip every item you inspect.
+An empty slot has score zero; a zero or negative baseline displays **percentage n/a** unless the scores are equal, which displays `=0.00 (+0.0%)`. Equipped and native shopping tooltips show their own item scores without recursively repeating candidate comparisons. Comparisons involving a partial candidate or equipped baseline display a warning because the missing stats could change the result. The addon evaluates item stats, not whether your class can equip every item you inspect.
 
 ## Debugging unrecognized stats
 
 Enable **Mark unrecognized stats in tooltips** in the editor. Static stat lines that the parser cannot recognize receive an orange `[ZV ?]` marker next to their text. This also works with no active profiles. It is off by default and does not change weights or item scores.
+
+The inline marker identifies a specific unrecognized line. A partial-data notice covers all detected issues, including unknown API fields, missing tooltip data and unavailable stat units, which may have no identifiable line to mark. Both indicators can appear for the same item. The partial-data notice is shown once per tooltip, and calculated known values remain visible.
+
+Use **Export issues** in the editor or `/zv exportissues` to copy one JSON report for every encountered item variant with issues. It includes raw client stats, original tooltip lines, parsed stats, warnings and profile-specific score issues. Collection runs even when inline debug markers are disabled. The issue history is separate from the score cache, survives `/reload` and logout, and is retained until `/zv clearissues`; clearing the score cache does not erase it. Repeated reads update a variant's diagnostic entry rather than adding duplicate items. This reports items encountered by the addon, rather than scanning the entire item database.
 
 Diagnostics include those lines, raw client stat keys, and parser warnings. Item descriptions, requirements, use effects, and set/proc descriptions are not marked as missing static stats. The detection is deliberately limited to stat-looking lines; it cannot identify every possible novel tooltip wording before that wording has been observed.
 
@@ -87,13 +99,15 @@ Editing weights or units increments the profile revision and invalidates its sco
 | `/zv clearcache` | Clear parsed stats and scores |
 | `/zv inspect` | Open diagnostics for a hovered item, or the main-hand item |
 | `/zv inspect <item link>` | Open diagnostics for a pasted item link |
+| `/zv exportissues` | Copy diagnostics for all encountered item variants with issues |
+| `/zv clearissues` | Reset the recorded issue history without changing profiles or score caches |
 | `/zv help` | Show commands |
 
 ## Scope and validation
 
 This release evaluates static item stats. It does not model procs, on-use effects, set bonuses, stat caps, talent interactions, DPS rotations, class equipment restrictions, or future equipment combinations. Spell-power or attack-power weights should already include their expected value for your build. A higher score is a stat-weight estimate, not a simulated DPS percentage.
 
-The Lua scoring, JSON, cache, parser, comparison, and tooltip/event logic are covered by mocked API tests included in `tests`. There is no running WoW client in this environment, so the actual UI rendering, the current Forever beta stat vocabulary, and secure tooltip behavior require an in-game check. Use `/zv inspect` to collect the raw keys and tooltip lines if an item is missing a stat or has an unavailable unit.
+The Lua scoring, JSON, cache, parser, comparison, issue export, and tooltip/event logic are covered by mocked API tests included in `tests`. There is no running WoW client in this environment, so the actual UI rendering, the current Forever beta stat vocabulary, and secure tooltip behavior require an in-game check. Use `/zv inspect` for one item or `/zv exportissues` for all recorded issues.
 
 Run the included tests from the addon directory with a Lua interpreter, for example:
 

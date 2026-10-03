@@ -4,6 +4,9 @@ GetInventoryItemLink = function(_, slot) return equipped[slot] end
 GetItemInfo = function(link) return "item",link,1,1,1,"Weapon","Sword",1,types[link] end
 CanDualWield = function() return true end
 function FW:GetScore(link) return scores[link], records[link] or "Loading" end
+function FW:ItemHasIssues(record,profile)
+    return record.partial or (record.scoreIssues and record.scoreIssues[profile.id])
+end
 assert(loadfile("Compare.lua"))("ZwykValues",FW)
 local function item(link, equipLoc, score)
     records[link]={equipLoc=equipLoc}; scores[link]=score; types[link]=equipLoc
@@ -35,4 +38,18 @@ result=FW:CompareItem("twohand",{})
 assert(result.comparisons[1].error and result.comparisons[1].delta==nil)
 item("food","",100)
 assert(#FW:CompareItem("food",{}).comparisons==0)
+-- Both candidate and equipped partial values remain comparable, with a warning
+-- flag propagated when either side omits a stat or selected secondary units.
+equipped[11]="ringA"; equipped[12]="ringB"
+records.ringA.partial=true
+result=FW:CompareItem("candidate",{id="test"})
+assert(result.score==90 and result.hasIssues and result.comparisons[1].hasIssues)
+assert(result.comparisons[1].baseline==100 and result.comparisons[1].delta==-10)
+assert(not result.comparisons[2].hasIssues)
+records.ringA.partial=false; records.ringB.scoreIssues={test={missingStats={crit=true}}}
+result=FW:CompareItem("candidate",{id="test"})
+assert(result.hasIssues and result.comparisons[2].hasIssues and result.comparisons[2].delta==10)
+records.ringB.scoreIssues=nil; records.candidate.partial=true
+result=FW:CompareItem("candidate",{id="test"})
+assert(result.hasIssues and result.score==90 and #result.comparisons==2)
 print("Comparison tests passed")

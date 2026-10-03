@@ -100,6 +100,7 @@ function methods:GetNumLines() local _, lines = self.text:gsub("\n", "") return 
 for _, name in ipairs({ "SetBackdrop", "SetBackdropColor", "SetBackdropBorderColor", "SetJustifyH", "SetJustifyV", "SetFontObject", "SetTextInsets", "SetAutoFocus", "SetMaxLetters", "SetMultiLine", "SetWordWrap", "SetFrameStrata", "SetClampedToScreen", "SetMovable", "SetResizable", "SetResizeBounds", "EnableMouse", "RegisterForDrag", "StartMoving", "StopMovingOrSizing", "StartSizing", "SetNormalTexture", "SetHighlightTexture", "SetPushedTexture", "UpdateScrollChildRect", "RegisterEvent" }) do
     methods[name] = function() end
 end
+function methods:SetMaxLetters(value) self.maxLetters=value end
 UIParent = widget("Frame", "UIParent")
 UIParent:SetSize(1920, 1080)
 UISpecialFrames, SlashCmdList, StaticPopupDialogs = {}, {}, {}
@@ -197,8 +198,19 @@ equal(exported.name, copied.name, "export is the selected full profile")
 equal(exported.weights.strength, 4, "export carries weights")
 equal(exported.color.b, copied.color.b, "export carries color")
 equal(exported.secondaryUnit, copied.secondaryUnit, "export carries stat units")
+equal(dialogText.maxLetters, 131072, "profile input retains its limit")
+click("Close")
+click("Export issues")
+local issues = assert(FW.JSON.Decode(dialogText:GetText()))
+equal(issues.format, "ZwykValuesIssues", "issue export button copies the aggregate diagnostics")
+equal(issues.itemCount, 0, "issue export works before any issues are recorded")
+equal(dialogText.maxLetters, 0, "aggregate diagnostics must not be silently truncated")
+local largeDiagnostics = string.rep("x", 140000)
+FW:ShowTextDialog("Large diagnostics", largeDiagnostics, false)
+equal(dialogText:GetText(), largeDiagnostics, "full diagnostics remain available to copy")
 click("Close")
 click("Weights JSON")
+equal(dialogText.maxLetters, 131072, "reopening profile export restores its input limit")
 local bare = assert(FW.JSON.Decode(dialogText:GetText()))
 equal(bare.strength, 4, "weights-only export uses Sixty Upgrades keys")
 equal(bare.name, nil, "weights-only export omits profile metadata")

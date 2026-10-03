@@ -12,23 +12,48 @@ local function safeString(value)
     if issecretvalue and issecretvalue(value) then return nil end
     return type(value) == "string" and value or nil
 end
+local function dataLink(data)
+    if type(data) ~= "table" then return nil end
+    local link = safeString(data.hyperlink)
+    if not link or link == "" then link = safeString(data.itemLink) end
+    if link and link ~= "" then return link end
+    local guid = safeString(data.guid)
+    if guid and C_Item and C_Item.GetItemLinkByGUID then
+        local ok, resolved = pcall(C_Item.GetItemLinkByGUID, guid)
+        if ok and safeString(resolved) and resolved ~= "" then return resolved end
+    end
+end
+local function comparisonLink(tooltip)
+    -- Native comparison data can contain only an item GUID. Keep the exact
+    -- equipped variant instead of rebuilding a base link from its item ID.
+    local manager = TooltipComparisonManager
+    local owner = manager and manager.tooltip
+    local shopping = owner and owner.shoppingTooltips
+    local info = manager and manager.compareInfo
+    if not shopping or not info then return nil end
+    if shopping[1] == tooltip then return dataLink(info.item) end
+    if shopping[2] == tooltip then
+        local items = info.additionalItems
+        return dataLink(items and items[manager.comparisonIndex or 1])
+    end
+end
 local function getLink(tooltip, data)
     if tooltip.GetItem then
         local ok, _, link = pcall(tooltip.GetItem, tooltip)
-        if ok and safeString(link) then return link end
+        if ok and safeString(link) and link ~= "" then return link end
     end
-    if data then
-        local link = safeString(data.hyperlink) or safeString(data.itemLink)
-        if link then return link end
+    local link = dataLink(data)
+    if link then return link end
+    local getter = tooltip.GetPrimaryTooltipData or tooltip.GetTooltipData
+    if getter then
+        local ok, current = pcall(getter, tooltip)
+        if ok then link = dataLink(current); if link then return link end end
     end
-    if tooltip.GetTooltipData then
-        local ok, current = pcall(tooltip.GetTooltipData, tooltip)
-        if ok and current then
-            local link = safeString(current.hyperlink) or safeString(current.itemLink)
-            if link then return link end
-        end
+    if TooltipUtil and TooltipUtil.GetDisplayedItem then
+        local ok, _, displayed = pcall(TooltipUtil.GetDisplayedItem, tooltip)
+        if ok and safeString(displayed) and displayed ~= "" then return displayed end
     end
-    return safeString(tooltip.fwSourceLink)
+    return comparisonLink(tooltip) or safeString(tooltip.fwSourceLink)
 end
 local function plainText(text)
     return text:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", ""):
@@ -68,6 +93,18 @@ local function formatNumber(value, signed)
     local result = string.format(signed and "%+.2f" or "%.2f", value)
     return result
 end
+local function comparisonText(item)
+    if item.error then return "|cffb2b2b2? comparison unavailable|r" end
+    local equal = item.status == "equal"
+    local arrow = equal and "=" or (item.status == "upgrade" and "↑" or "↓")
+    local color = equal and "b2b2b2" or (item.status == "upgrade" and "40ff59" or "ff5959")
+    local delta = equal and "0.00" or formatNumber(item.delta, true)
+    local percent = equal and "+0.0%" or (item.percent and string.format("%+.1f%%", item.percent))
+    return "|cff" .. color .. arrow .. delta .. " (" .. (percent or "n/a") .. ")|r"
+end
+local function hasIssues(record, profile)
+    return record and ((FW.ItemHasIssues and FW:ItemHasIssues(record, profile)) or record.partial)
+end
 local function activeSignature(profiles)
     local parts = {}
     for _, profile in ipairs(profiles) do
@@ -80,7 +117,10 @@ local function activeSignature(profiles)
 end
 local function comparisonTooltip(tooltip)
     local name = tooltip.GetName and tooltip:GetName() or ""
-    return name:find("ShoppingTooltip", 1, true) ~= nil
+    if name:find("ShoppingTooltip", 1, true) then return true end
+    local owner = TooltipComparisonManager and TooltipComparisonManager.tooltip
+    local shopping = owner and owner.shoppingTooltips
+    return shopping and (shopping[1] == tooltip or shopping[2] == tooltip)
 end
 
 function FW:DecorateTooltip(tooltip, data)
@@ -95,9 +135,11 @@ function FW:DecorateTooltip(tooltip, data)
     decorating = true
     tooltip.fwSignature = signature
     watched[tooltip] = link
+    local issues, notes = false, {}
     if debugEnabled then
         local record = self:GetItem(link)
         self:MarkUnknownStats(tooltip, record)
+        issues = hasIssues(record)
     end
     local equipped = false
     if tooltip.IsEquippedItem then
@@ -108,7 +150,6 @@ function FW:DecorateTooltip(tooltip, data)
         not (self.DB.options and self.DB.options.showComparisons == false)
     if #profiles > 0 then
         tooltip:AddLine(" ")
-        tooltip:AddLine("ZwykValues", 0.5, 0.8, 1)
     end
     for _, profile in ipairs(profiles) do
         local r, g, b = profile.color.r, profile.color.g, profile.color.b
@@ -121,27 +162,24 @@ function FW:DecorateTooltip(tooltip, data)
             else errorMessage = record end
         end
         if result then
-            tooltip:AddDoubleLine(profile.name, formatNumber(result.score), r,g,b, r,g,b)
+            local comparisons = {}
             for _, item in ipairs(result.comparisons) do
-                if item.error then
-                    tooltip:AddLine("  " .. item.label .. ": " .. item.error, .75,.75,.75, true)
-                else
-                    local text = "  " .. item.label .. ": " .. formatNumber(item.delta, true)
-                    if item.percent then text = text .. " (" .. string.format("%+.1f%%", item.percent) .. ")"
-                    elseif item.baseline <= 0 then text = text .. " (percentage n/a)" end
-                    text = text .. " " .. item.status
-                    local color = item.status == "upgrade" and {.25,1,.35} or
-                        (item.status == "downgrade" and {1,.35,.35} or {.7,.7,.7})
-                    tooltip:AddLine(text, color[1],color[2],color[3], true)
-                end
+                comparisons[#comparisons+1] = comparisonText(item)
+                if item.error then notes[item.error] = true end
+                issues = issues or item.hasIssues
             end
-            if result.note then tooltip:AddLine("  " .. result.note, .75,.75,.75, true) end
-            if result.record.partial then
-                tooltip:AddLine("  Partial stat data; use /zv inspect for details.", 1,.7,.25, true)
-            end
+            local values = formatNumber(result.score)
+            if #comparisons > 0 then values = values .. " " .. table.concat(comparisons, " | ") end
+            tooltip:AddDoubleLine(profile.name, values, r,g,b, r,g,b)
+            if result.note then notes[result.note] = true end
+            issues = issues or result.hasIssues or hasIssues(result.record, profile)
         else
             tooltip:AddLine(profile.name .. ": " .. tostring(errorMessage or "Item data loading"), r,g,b, true)
         end
+    end
+    for note in pairs(notes) do tooltip:AddLine("  " .. note, .75,.75,.75, true) end
+    if issues then
+        tooltip:AddLine("Partial stat data; /zv inspect or /zv exportissues.", 1,.7,.25, true)
     end
     decorating = false
     -- Native post-processing performs sizing after this callback. Legacy
@@ -233,6 +271,12 @@ function FW:InstallTooltipHooks()
                     end
                 end)
             end
+            if tooltip.SetCompareItem then
+                pcall(hooksecurefunc, tooltip, "SetCompareItem", function(t, other)
+                    decorate(t)
+                    if safeFrame(other) then decorate(other) end
+                end)
+            end
             local linkMethods = {
                 SetLootItem="GetLootSlotLink", SetLootRollItem="GetLootRollItemLink",
                 SetMerchantItem="GetMerchantItemLink", SetQuestItem="GetQuestItemLink",
@@ -253,6 +297,14 @@ function FW:InstallTooltipHooks()
         end
     end
     for _, name in ipairs(standard) do hook(_G[name]) end
+    local manager = TooltipComparisonManager
+    if hooksecurefunc and manager and manager.SetItemTooltip then
+        pcall(hooksecurefunc, manager, "SetItemTooltip", function(m, primary)
+            local shopping = m.tooltip and m.tooltip.shoppingTooltips
+            local tooltip = shopping and shopping[primary and 1 or 2]
+            if safeFrame(tooltip) then hook(tooltip); decorate(tooltip) end
+        end)
+    end
     if modern then
         TooltipDataProcessor.AddTooltipPostCall(Enum.TooltipDataType.Item, function(t, data)
             hook(t)

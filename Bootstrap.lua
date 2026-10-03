@@ -1,6 +1,6 @@
 local addonName, FW = ...
 _G.ZwykValues = FW
-FW.version = "0.1.2"
+FW.version = "0.1.3"
 
 function FW:Print(message)
     local text = "|cff80ccffZwykValues:|r " .. tostring(message)
@@ -19,15 +19,29 @@ local function inspect(link)
     local record, err = FW:GetItem(link)
     if not record then FW:Print(tostring(err)); return end
     local raw = FW.GetRawItemStats and FW:GetRawItemStats(link) or {}
-    local data = {item=link, build=GetBuildInfo and ({GetBuildInfo()}) or {},
+    local stored = FW.DB.itemIssues and FW.DB.itemIssues[record.key] or {}
+    local data = {item=link, name=record.name, key=record.key, partial=record.partial,
+        build=GetBuildInfo and ({GetBuildInfo()}) or {},
         locale=GetLocale and GetLocale() or "unknown", stats=record.stats,
         percentStats=record.percentStats, ratingStats=record.ratingStats,
         unresolvedStats=record.unresolvedStats, unrecognizedLines=record.unrecognizedLines,
-        warnings=record.warnings, raw=raw}
+        unknownAPIStats=record.unknownAPIStats, warnings=record.warnings, raw=raw,
+        scoreIssues=stored.scoreIssues, profileScores=stored.profileScores}
+    if FW.CopyItemDiagnostic then data=FW:CopyItemDiagnostic(data) end
     local json, encodeError = FW.JSON.Encode(data)
     if FW.ShowTextDialog then FW:ShowTextDialog("Item diagnostics", json or tostring(encodeError), false)
     elseif FW.ShowTransferDialog then FW:ShowTransferDialog("Item diagnostics", json or tostring(encodeError), false)
     else FW:Print(json or tostring(encodeError)) end
+end
+
+function FW:ExportItemIssues()
+    local report = self:GetIssueReport()
+    local json, err = self.JSON.Encode(report)
+    if not json then self:Print("Could not export item issues: " .. tostring(err)); return end
+    local title = "Item issues (" .. tostring(report.itemCount) .. ")"
+    if self.ShowTextDialog then self:ShowTextDialog(title, json, false)
+    elseif self.ShowTransferDialog then self:ShowTransferDialog(title, json, false)
+    else self:Print(json) end
 end
 
 SLASH_ZWYKVALUES1 = "/zv"
@@ -42,8 +56,12 @@ SlashCmdList.ZWYKVALUES = function(message)
         FW:InvalidateCache(); FW:Print("Item and score caches cleared.")
     elseif command == "inspect" then
         inspect(rest ~= "" and rest or nil)
+    elseif command == "exportissues" then
+        FW:ExportItemIssues()
+    elseif command == "clearissues" then
+        FW:ClearItemIssues(); FW:Print("Recorded item issues cleared.")
     elseif command == "help" then
-        FW:Print("/zv opens profiles. /zv cache, /zv clearcache, /zv inspect [item link].")
+        FW:Print("/zv opens profiles. /zv cache, /zv clearcache, /zv inspect [item link], /zv exportissues, /zv clearissues.")
     else FW:ToggleUI() end
 end
 

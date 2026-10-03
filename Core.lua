@@ -1,7 +1,7 @@
 local _, FW = ...
 
 FW.CACHE_LIMIT = 2000
-FW.CACHE_VERSION = 1
+FW.CACHE_VERSION = 2
 local secondaryKeys = { hit = true, crit = true, haste = true, expertise = true, defense = true, dodge = true, parry = true, block = true }
 FW.SecondaryStatKeys = secondaryKeys
 local defaultColor = { r = 0.35, g = 0.8, b = 1 }
@@ -127,6 +127,12 @@ function FW:Initialize()
     db.nextProfileID = finite(db.nextProfileID) and math.max(1, math.floor(db.nextProfileID)) or 1
     db.options = type(db.options) == "table" and db.options or {}
     if db.options.showComparisons == nil then db.options.showComparisons = true end
+    -- Diagnostics have their own lifetime: cache eviction or clearing cached
+    -- scores must not discard the problem items the user wants to export.
+    db.itemIssues = type(db.itemIssues) == "table" and db.itemIssues or {}
+    for key, entry in pairs(db.itemIssues) do
+        if type(key) ~= "string" or type(entry) ~= "table" then db.itemIssues[key] = nil end
+    end
     local normalized, seen = {}, {}
     local function restore(id, profile)
         if type(id) ~= "string" or type(profile) ~= "table" or seen[id] then return end
@@ -207,6 +213,10 @@ function FW:CreateProfile(name, weights)
 end
 
 local function clearProfileScores(db, id)
+    for _, record in pairs(db.cache.items) do
+        if type(record.scoreIssues) == "table" then record.scoreIssues[id] = nil end
+        if type(record.profileScores) == "table" then record.profileScores[id] = nil end
+    end
     for itemKey, scores in pairs(db.cache.scores) do
         if type(scores) == "table" then
             scores[id] = nil
@@ -357,6 +367,113 @@ function FW:ScoreStats(profile, stats)
     return total
 end
 
+function FW:ItemHasIssues(record, profile)
+    if type(record) ~= "table" then return false end
+    if record.partial or #(record.warnings or {}) > 0 or #(record.unrecognizedLines or {}) > 0
+        or #(record.unknownAPIStats or {}) > 0 then return true end
+    local issues = record.scoreIssues or {}
+    if profile then return issues[type(profile) == "table" and profile.id or profile] ~= nil end
+    return next(issues) ~= nil
+end
+
+function FW:ItemIssueSummary(record, profile)
+    if not self:ItemHasIssues(record, profile) then return nil end
+    local issue = profile and record.scoreIssues and record.scoreIssues[type(profile) == "table" and profile.id or profile]
+    if issue and #issue.warnings > 0 then return table.concat(issue.warnings, " ") end
+    if #(record.warnings or {}) > 0 then return table.concat(record.warnings, " ") end
+    return "Some item stats could not be read reliably."
+end
+
+-- Keep only serializable, non-secret diagnostic data. Item API fields can be
+-- protected or non-finite on some clients; preserve that fact as text instead
+-- of trying to compare, stringify, or export the protected value itself.
+local function diagnosticCopy(value, seen, depth)
+    if issecretvalue and issecretvalue(value) then return "[secret value unavailable]" end
+    local kind = type(value)
+    if kind == "number" then return finite(value) and value or "[non-finite number]" end
+    if kind == "string" then
+        if FW.JSON.Encode(value) then return value end
+        return "[invalid UTF-8 bytes] " .. value:gsub(".", function(byte) return string.format("%02x ", byte:byte()) end)
+    end
+    if kind == "boolean" or kind == "nil" then return value end
+    if kind ~= "table" then return "[" .. kind .. " value unavailable]" end
+    seen = seen or {}
+    depth = depth or 0
+    if depth >= 24 then return "[diagnostic nesting limit]" end
+    if seen[value] then return "[circular table]" end
+    seen[value] = true
+    local result, count, maximum, dense = {}, 0, 0, true
+    for key in pairs(value) do
+        if (issecretvalue and issecretvalue(key)) or not finite(key) or key < 1 or key ~= math.floor(key) then dense = false
+        else count = count + 1; if key > maximum then maximum = key end end
+    end
+    dense = dense and count > 0 and maximum == count
+    for key, child in pairs(value) do
+        local copiedKey
+        if issecretvalue and issecretvalue(key) then copiedKey = "[secret key unavailable]"
+        elseif dense then copiedKey = key
+        elseif type(key) == "string" then copiedKey = diagnosticCopy(key)
+        elseif type(key) == "number" or type(key) == "boolean" then copiedKey = tostring(key)
+        else copiedKey = "[" .. type(key) .. " key unavailable]" end
+        result[copiedKey] = diagnosticCopy(child, seen, depth + 1)
+    end
+    seen[value] = nil
+    return result
+end
+
+function FW:CopyItemDiagnostic(value)
+    return diagnosticCopy(value)
+end
+
+function FW:RecordItemIssue(record)
+    if not self:ItemHasIssues(record) or type(record.key) ~= "string" then return end
+    self:Initialize()
+    local old = self.DB.itemIssues[record.key]
+    local diagnostic = record.diagnostic or {}
+    local entry = diagnosticCopy({
+        key = record.key, itemID = record.itemID, name = record.name or diagnostic.name,
+        link = record.link, equipLoc = record.equipLoc, parserVersion = record.parserVersion,
+        build = diagnostic.build, locale = diagnostic.locale, level = diagnostic.level,
+        source = diagnostic.source, apiAvailable = diagnostic.apiAvailable,
+        raw = diagnostic.raw or {}, ignoredAPIStats = diagnostic.ignoredKeys or {},
+        unknownAPIStats = record.unknownAPIStats or diagnostic.unknownKeys or {},
+        tooltipLines = diagnostic.tooltipLines or {}, tooltipSource = diagnostic.tooltipSource,
+        tooltipDetails = diagnostic.tooltipDetails or {},
+        stats = record.stats, percentStats = record.percentStats, ratingStats = record.ratingStats,
+        unresolvedStats = record.unresolvedStats or {}, unrecognizedLines = record.unrecognizedLines or {},
+        partial = record.partial == true, warnings = record.warnings or {},
+        scoreIssues = record.scoreIssues or {}, profileScores = record.profileScores or {},
+    })
+    -- A partial item may be re-read once per active profile. Merge the profile
+    -- results so the last read does not erase the other profile's diagnostics.
+    if old then
+        for _, field in ipairs({ "scoreIssues", "profileScores" }) do
+            for id, value in pairs(old[field] or {}) do
+                local recomputedIssue = field == "scoreIssues" and entry.profileScores[id] ~= nil
+                if entry[field][id] == nil and not recomputedIssue then entry[field][id] = diagnosticCopy(value) end
+            end
+        end
+    end
+    local now = time and time() or nil
+    entry.firstSeen, entry.lastSeen = old and old.firstSeen or now, now
+    self.DB.itemIssues[record.key] = entry
+end
+
+function FW:GetIssueReport()
+    self:Initialize()
+    local keys, items = {}, self.JSON.array()
+    for key in pairs(self.DB.itemIssues) do keys[#keys + 1] = key end
+    table.sort(keys)
+    for _, key in ipairs(keys) do items[#items + 1] = diagnosticCopy(self.DB.itemIssues[key]) end
+    return { format = "ZwykValuesIssues", version = 1, addonVersion = self.version,
+        generatedAt = time and time() or nil, itemCount = #items, items = items }
+end
+
+function FW:ClearItemIssues()
+    self:Initialize()
+    self.DB.itemIssues = {}
+end
+
 function FW:GetScore(link, profile)
     self:Initialize()
     if type(profile) == "string" then profile = self.DB.profiles[profile] end
@@ -367,13 +484,18 @@ function FW:GetScore(link, profile)
     local cache = self.DB.cache
     local scores = cache.scores[record.key]
     local cached = type(scores) == "table" and scores[profile.id]
-    if not record.partial and type(cached) == "table" and cached.revision == profile.revision and finite(cached.score) then return cached.score, record end
+    if not record.partial and type(cached) == "table" and cached.revision == profile.revision and finite(cached.score) then
+        self:RecordItemIssue(record)
+        return cached.score, record
+    end
     local stats = {}
     for key, value in pairs(record.stats) do stats[key] = value end
+    local missingStats, scoreWarnings = {}, {}
     for key in pairs(record.unresolvedStats or {}) do
         if not secondaryKeys[key] and (profile.weights[key] or 0) ~= 0 then
             local label = self.StatByKey[key] and self.StatByKey[key].label or key
-            return nil, label .. " could not be read reliably for this item."
+            missingStats[key] = true
+            scoreWarnings[#scoreWarnings + 1] = label .. " could not be read completely; its known value contributes to this subtotal."
         end
     end
     local selected = profile.secondaryUnit == "rating" and record.ratingStats or record.percentStats
@@ -385,7 +507,8 @@ function FW:GetScore(link, profile)
             if (profile.weights[key] or 0) ~= 0 and (other[key] ~= nil or (record.unresolvedStats and record.unresolvedStats[key])) then
                 local label = self.StatByKey[key] and self.StatByKey[key].label or key
                 local unit = profile.secondaryUnit == "rating" and "rating points" or (key == "defense" and "defense skill points" or "percentage points")
-                return nil, label .. " is unavailable in " .. unit .. " for this item; check the profile's secondary stat unit."
+                missingStats[key] = true
+                scoreWarnings[#scoreWarnings + 1] = label .. " is unavailable in " .. unit .. "; its contribution is omitted. Check the profile's secondary stat unit."
             end
             value = 0
         end
@@ -393,9 +516,19 @@ function FW:GetScore(link, profile)
     end
     local score = self:ScoreStats(profile, stats)
     if not finite(score) then return nil, "This item's weighted total is not finite; reduce the profile weights." end
+    table.sort(scoreWarnings)
+    record.scoreIssues, record.profileScores = record.scoreIssues or {}, record.profileScores or {}
+    local scorePartial = next(missingStats) ~= nil
+    record.scoreIssues[profile.id] = scorePartial and { name = profile.name, secondaryUnit = profile.secondaryUnit,
+        revision = profile.revision, missingStats = missingStats, warnings = scoreWarnings } or nil
+    record.profileScores[profile.id] = { name = profile.name, revision = profile.revision,
+        secondaryUnit = profile.secondaryUnit, score = score, partial = record.partial == true or scorePartial }
+    self:RecordItemIssue(record)
     -- A partially loaded tooltip may gain more stats on the next read. It must
     -- never become a persistent item/score entry merely because scoring ran.
-    if record.partial then return score, record end
+    if record.partial or scorePartial then
+        return score, record, #scoreWarnings > 0 and table.concat(scoreWarnings, " ") or self:ItemIssueSummary(record, profile)
+    end
     scores = type(scores) == "table" and scores or {}
     scores[profile.id] = { revision = profile.revision, score = score }
     cache.scores[record.key] = scores
