@@ -44,7 +44,14 @@ function FW:CompareItem(link, profile)
     local result = {score=score, record=record, comparisons={}}
     result.hasIssues = (self.ItemHasIssues and self:ItemHasIssues(record, profile)) or record.partial
     local equipLoc = record.equipLoc
-    local mainType = inventoryType(inventoryLink(16))
+    local mainLink = inventoryLink(16)
+    local mainType = inventoryType(mainLink)
+    if mainLink and not mainType and (equipLoc == "INVTYPE_WEAPON" or
+        equipLoc == "INVTYPE_WEAPONMAINHAND" or equipLoc == "INVTYPE_WEAPONOFFHAND" or
+        equipLoc == "INVTYPE_SHIELD" or equipLoc == "INVTYPE_HOLDABLE") then
+        result.note, result.pending = "Equipped main-hand item data is loading.", true
+        return result
+    end
     if (equipLoc == "INVTYPE_SHIELD" or equipLoc == "INVTYPE_HOLDABLE" or
         equipLoc == "INVTYPE_WEAPONOFFHAND") and mainType == "INVTYPE_2HWEAPON" then
         result.note = "Requires a compatible main-hand weapon."

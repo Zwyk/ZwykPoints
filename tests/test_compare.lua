@@ -34,6 +34,16 @@ item("newSword","INVTYPE_WEAPON",110)
 result=FW:CompareItem("newSword",{})
 assert(#result.comparisons==1 and result.note)
 equipped[16]="unloaded"
+result=FW:CompareItem("shield",{})
+assert(result.pending and #result.comparisons==0 and result.score==50,
+    "missing main-hand type cannot turn a shield into an upgrade against an empty offhand")
+result=FW:CompareItem("newSword",{})
+assert(result.pending and #result.comparisons==0,
+    "unknown main-hand compatibility must not add a dual-wield replacement")
+types.unloaded="INVTYPE_2HWEAPON"
+result=FW:CompareItem("shield",{})
+assert(not result.pending and #result.comparisons==0 and result.note)
+types.unloaded=nil
 result=FW:CompareItem("twohand",{})
 assert(result.comparisons[1].error and result.comparisons[1].delta==nil)
 item("food","",100)

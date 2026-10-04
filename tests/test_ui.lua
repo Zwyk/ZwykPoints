@@ -111,8 +111,9 @@ StaticPopup_Show = function(kind, _, _, data) popup = { kind = kind, data = data
 
 local FW = {}
 for _, file in ipairs({ "JSON.lua", "Stats.lua", "Core.lua", "UI.lua" }) do assert(loadfile(addonPath .. "/" .. file))("ZwykValues", FW) end
-local tooltipRefreshes = 0
+local tooltipRefreshes, upgradeRefreshes = 0, 0
 function FW:RefreshTooltips() tooltipRefreshes = tooltipRefreshes + 1 end
+function FW:RefreshUpgradeIndicators() upgradeRefreshes = upgradeRefreshes + 1 end
 function FW:InstallTooltipHooks() end
 assert(loadfile(addonPath .. "/Bootstrap.lua"))("ZwykValues", FW)
 equal(FW.UI, nil, "loading modules creates no editor")
@@ -187,10 +188,55 @@ debug:SetChecked(false)
 debug:Fire("OnClick")
 equal(FW.DB.options.debugUnknownStats, false, "debug checkbox can disable warnings")
 
+local main = byText("Main for upgrade arrows", "FontString").parent
+local mainName = byText("Main: None", "FontString")
+equal(FW:GetMainProfile(), nil, "arrows start with no main profile")
+check(not main:GetChecked(), "selected profile is not main by default")
+local arrowControls = {}
+for _, key in ipairs({ "upgradeBags", "upgradeRolls", "upgradeChat" }) do
+    local control = find(function(candidate) return candidate.optionKey == key end)
+    arrowControls[#arrowControls + 1] = control
+    check(not control:GetChecked(), key .. " starts disabled")
+    control:SetChecked(true)
+    local before = upgradeRefreshes
+    control:Fire("OnClick")
+    equal(FW.DB.options[key], true, key .. " can be enabled independently")
+    equal(upgradeRefreshes, before + 1, key .. " immediately refreshes upgrade indicators")
+    equal(FW:GetMainProfile(), nil, "location toggles do not implicitly choose a main profile")
+end
+main:SetChecked(true)
+local beforeMainRefresh = upgradeRefreshes
+main:Fire("OnClick")
+equal(FW:GetMainProfile(), profile, "selected profile can be designated main")
+equal(mainName:GetText(), "Main: " .. profile.name, "main name appears in upgrade panel")
+equal(upgradeRefreshes, beforeMainRefresh + 1, "main selection immediately refreshes arrows")
+local active = byText("Active in tooltips", "FontString").parent
+active:SetChecked(false)
+active:Fire("OnClick")
+check(not profile.active, "tooltip visibility can be disabled on the main profile")
+equal(FW:GetMainProfile(), profile, "main profile remains chosen while inactive in tooltips")
+check(main:GetChecked(), "main checkbox stays checked after tooltip visibility changes")
+
 click("Copy")
 equal(#FW:GetProfiles(), 2, "copy creates another profile")
 local copied = FW:GetProfiles()[2]
 equal(copied.weights.strength, 4, "copy retains saved weights")
+check(not main:GetChecked(), "copying a main profile does not designate the copy main")
+equal(FW:GetMainProfile(), profile, "copy leaves original main designation intact")
+main:SetChecked(true)
+main:Fire("OnClick")
+equal(FW:GetMainProfile(), copied, "choosing a second main replaces the first")
+equal(mainName:GetText(), "Main: " .. copied.name, "main display follows chosen profile")
+main:SetChecked(false)
+main:Fire("OnClick")
+equal(FW:GetMainProfile(), nil, "main checkbox can clear the main profile")
+equal(mainName:GetText(), "Main: None", "clearing main displays None")
+for index, key in ipairs({ "upgradeBags", "upgradeRolls", "upgradeChat" }) do
+    equal(FW.DB.options[key], true, "clearing main preserves " .. key .. " preference")
+    arrowControls[index]:SetChecked(false)
+    arrowControls[index]:Fire("OnClick")
+    equal(FW.DB.options[key], false, key .. " can be independently disabled")
+end
 click("Export")
 local dialogText = ZwykValuesJSONScroll.scrollChild
 local exported = assert(FW.JSON.Decode(dialogText:GetText()))
@@ -254,5 +300,19 @@ for _, dimensions in ipairs({ {930, 720}, {850, 600} }) do
     within(byText("Apply weights", "Button"), FW.UI, "apply button fits editor")
     within(byText("Clear cache", "Button"), FW.UI, "cache button fits footer")
     check(ZwykValuesStatsScroll:GetHeight() >= 190, "resized editor keeps useful visible weight area")
+    local upgradePanel = main.parent
+    within(upgradePanel, FW.UI, "upgrade panel fits minimum editor size")
+    within(mainName, upgradePanel, "main name fits upgrade panel")
+    within(byText("Main for upgrade arrows", "FontString"), upgradePanel, "main checkbox label fits compact panel")
+    separate(ZwykValuesProfilesScroll, upgradePanel, "profile list leaves room for upgrade settings")
+    separate(upgradePanel, byText("New", "Button"), "upgrade settings leave room for profile buttons")
+    check(ZwykValuesProfilesScroll:GetHeight() >= 170, "compact settings retain useful profile list height")
+    for _, control in ipairs(arrowControls) do
+        within(control, upgradePanel, "arrow location checkbox fits panel")
+        for _, child in ipairs(control.children) do within(child, upgradePanel, "arrow location label fits panel") end
+        separate(main, control, "main choice does not overlap arrow locations")
+    end
+    separate(arrowControls[1], arrowControls[2], "bag and roll arrow toggles do not overlap")
+    separate(arrowControls[2], arrowControls[3], "roll and chat arrow toggles do not overlap")
 end
 print("UI: " .. passed .. " checks passed (widget smoke and approximate geometry).")

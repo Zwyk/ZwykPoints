@@ -85,4 +85,12 @@ SlashCmdList.ZWYKVALUES("exportissues")
 assert(counts.dialog==2 and counts.dialogTitle=="Item issues (1)" and FW.lastEncoded.items[1].itemID==777)
 SlashCmdList.ZWYKVALUES("clearissues")
 assert(counts.clearIssues==1 and counts.invalidate==2, "Clearing issue history must not clear the score cache")
+assert(events.UNIT_INVENTORY_CHANGED)
+local before=counts.refresh
+local revision=FW.equipmentRevision
+fire("UNIT_INVENTORY_CHANGED","target")
+assert(counts.refresh==before and FW.equipmentRevision==revision)
+fire("UNIT_INVENTORY_CHANGED","player")
+assert(counts.refresh==before+1 and FW.equipmentRevision==revision+1,
+    "in-place equipment/enchant updates invalidate upgrade decisions")
 print("Bootstrap tests passed")

@@ -153,6 +153,7 @@ local function refreshEditor(force)
         if force or not UI.dirtyName then UI.name:SetText(profile.name or "") end
         if force or not UI.dirtyColor then UI.color:SetText(hexColor(profile.color)) end
         UI.active:SetChecked(profile.active and true or false)
+        UI.main:SetChecked(FW.DB and FW.DB.options and FW.DB.options.mainProfileID == profile.id)
         previewColor(parseColor(UI.color:GetText()) or profile.color)
         updateUnitHelp(profile)
         for _, field in ipairs(UI.fields) do
@@ -166,6 +167,7 @@ local function refreshEditor(force)
         UI.name:SetText("")
         UI.color:SetText("#FFFFFF")
         UI.active:SetChecked(false)
+        UI.main:SetChecked(false)
         previewColor()
         updateUnitHelp(nil)
         for _, field in ipairs(UI.fields) do
@@ -595,7 +597,7 @@ local function createUI()
     label(UI.left, "Profiles", 13, { 1, 0.82, 0.35 }):SetPoint("TOPLEFT", 12, -13)
     UI.profileScroll = CreateFrame("ScrollFrame", "ZwykValuesProfilesScroll", UI.left, "UIPanelScrollFrameTemplate")
     UI.profileScroll:SetPoint("TOPLEFT", 9, -38)
-    UI.profileScroll:SetPoint("BOTTOMRIGHT", -30, 47)
+    UI.profileScroll:SetPoint("BOTTOMRIGHT", -30, 215)
     UI.profileContent = CreateFrame("Frame", nil, UI.profileScroll)
     UI.profileContent:SetSize(179, 1)
     UI.profileScroll:SetScrollChild(UI.profileContent)
@@ -605,6 +607,52 @@ local function createUI()
     UI.copy:SetPoint("LEFT", UI.new, "RIGHT", 7, 0)
     UI.delete = button(UI.left, "Delete", 61, confirmDelete)
     UI.delete:SetPoint("LEFT", UI.copy, "RIGHT", 7, 0)
+
+    UI.upgrades = panel(UI.left)
+    UI.upgrades:SetPoint("BOTTOMLEFT", 8, 46)
+    UI.upgrades:SetPoint("BOTTOMRIGHT", -8, 46)
+    UI.upgrades:SetHeight(160)
+    label(UI.upgrades, "Upgrade arrows", 12, { 1, 0.82, 0.35 }):SetPoint("TOPLEFT", 9, -10)
+    UI.mainName = label(UI.upgrades, "Main: None", 10, { 0.76, 0.82, 0.9 })
+    UI.mainName:SetPoint("TOPLEFT", 9, -29)
+    UI.mainName:SetPoint("TOPRIGHT", -9, -29)
+    UI.mainName:SetHeight(18)
+    UI.mainName:SetWordWrap(false)
+    UI.main = CreateFrame("CheckButton", nil, UI.upgrades, "UICheckButtonTemplate")
+    UI.main:SetSize(24, 24)
+    UI.main:SetPoint("TOPLEFT", 5, -50)
+    label(UI.main, "Main for upgrade arrows", 10, { 0.88, 0.91, 0.96 }):SetPoint("LEFT", UI.main, "RIGHT", 0, 0)
+    UI.main:SetScript("OnClick", function(self)
+        local profile = selectedProfile()
+        if not profile then return end
+        UI.committing = true
+        local ok, err = FW:SetMainProfile(self:GetChecked() and profile.id or nil)
+        UI.committing = false
+        FW:RefreshUI()
+        if not ok then
+            status(err or "Could not change the main profile.", "error")
+        else
+            status(self:GetChecked() and (profile.name .. " is the main profile for upgrade arrows.") or "Main profile cleared. Choose one to show upgrade arrows.", "success")
+        end
+    end)
+    hint(UI.main, "Main profile for upgrade arrows", "Use the selected profile to identify upgrades against your equipped items. Choosing another profile replaces the previous main profile. It works even when this profile is inactive in tooltips. Clear this checkbox to use no main profile.")
+    local function upgradeOption(text, y, key, explanation)
+        local control = CreateFrame("CheckButton", nil, UI.upgrades, "UICheckButtonTemplate")
+        control:SetSize(22, 22)
+        control:SetPoint("TOPLEFT", 6, -y)
+        label(control, text, 10, { 0.76, 0.82, 0.9 }):SetPoint("LEFT", control, "RIGHT", 1, 0)
+        control.optionKey, control.default = key, false
+        control:SetScript("OnClick", function(self)
+            local ok, err = FW:SetUpgradeOption(key, self:GetChecked() and true or false)
+            FW:RefreshUI()
+            if not ok then status(err or "Could not update upgrade arrows.", "error") end
+        end)
+        hint(control, text .. " upgrade arrows", explanation .. " Requires a main profile. Each location can be enabled independently; changes apply immediately.")
+        return control
+    end
+    UI.upgradeBags = upgradeOption("In bags", 79, "upgradeBags", "Show an upgrade arrow on bag item icons.")
+    UI.upgradeRolls = upgradeOption("Loot rolls", 103, "upgradeRolls", "Show an upgrade arrow on the item icon in native loot-roll windows.")
+    UI.upgradeChat = upgradeOption("Chat item links", 127, "upgradeChat", "Show an arrow next to item links in newly received chat messages once item data is loaded. Existing messages keep their original display.")
 
     UI.right = panel(frame)
     UI.right:SetPoint("TOPLEFT", 250, -71)
@@ -695,7 +743,7 @@ local function createUI()
     UI.exportWeights:SetPoint("RIGHT", UI.export, "LEFT", -6, 0)
     hint(UI.export, "Export profile", "Exports the saved profile with its name, color and units. Apply edited weights before exporting.")
     hint(UI.exportWeights, "Export weights", "Exports the saved weights using Sixty Upgrades keys. Name, color and unit metadata are omitted.")
-    UI.profileControls = { UI.name, UI.rename, UI.active, UI.color, UI.colorButton, UI.percent, UI.rating, UI.apply }
+    UI.profileControls = { UI.name, UI.rename, UI.active, UI.main, UI.color, UI.colorButton, UI.percent, UI.rating, UI.apply }
     buildWeightFields()
 
     local note = label(frame, "Fixed weights ignore caps, procs, sets and rotations.", 10, { 0.66, 0.71, 0.79 })
@@ -797,8 +845,10 @@ function FW:RefreshUI()
         for _ in pairs(self.DB.cache.items) do count = count + 1 end
     end
     UI.cache:SetText(string.format("Cached items: %d  |  Profiles: %d", count, #all))
+    local mainProfile = self:GetMainProfile()
+    UI.mainName:SetText("Main: " .. (mainProfile and mainProfile.name or "None"))
     local options = self.DB and self.DB.options or {}
-    for _, control in ipairs({ UI.debugUnknown, UI.comparisons }) do
+    for _, control in ipairs({ UI.debugUnknown, UI.comparisons, UI.upgradeBags, UI.upgradeRolls, UI.upgradeChat }) do
         local value = options[control.optionKey]
         if value == nil then value = control.default end
         control:SetChecked(value and true or false)

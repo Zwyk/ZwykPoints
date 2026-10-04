@@ -4,6 +4,7 @@ FW.CACHE_LIMIT = 2000
 FW.CACHE_VERSION = 2
 local secondaryKeys = { hit = true, crit = true, haste = true, expertise = true, defense = true, dodge = true, parry = true, block = true }
 FW.SecondaryStatKeys = secondaryKeys
+local upgradeOptions = { upgradeBags = true, upgradeRolls = true, upgradeChat = true }
 local defaultColor = { r = 0.35, g = 0.8, b = 1 }
 
 local function finite(value)
@@ -127,6 +128,7 @@ function FW:Initialize()
     db.nextProfileID = finite(db.nextProfileID) and math.max(1, math.floor(db.nextProfileID)) or 1
     db.options = type(db.options) == "table" and db.options or {}
     if db.options.showComparisons == nil then db.options.showComparisons = true end
+    for key in pairs(upgradeOptions) do db.options[key] = db.options[key] == true end
     -- Diagnostics have their own lifetime: cache eviction or clearing cached
     -- scores must not discard the problem items the user wants to export.
     db.itemIssues = type(db.itemIssues) == "table" and db.itemIssues or {}
@@ -159,6 +161,9 @@ function FW:Initialize()
     table.sort(remainder)
     for _, id in ipairs(remainder) do restore(id, db.profiles[id]) end
     db.profileOrder = normalized
+    if type(db.options.mainProfileID) ~= "string" or not db.profiles[db.options.mainProfileID] then
+        db.options.mainProfileID = nil
+    end
     local cache = db.cache
     if type(cache) ~= "table" or cache.version ~= self.CACHE_VERSION then
         db.cache = blankCache()
@@ -185,8 +190,40 @@ function FW:GetProfiles(activeOnly)
 end
 
 function FW:NotifyChanged()
+    if self.InvalidateUpgradeComparisons then self:InvalidateUpgradeComparisons() end
     if self.RefreshUI then self:RefreshUI() end
     if self.RefreshTooltips then self:RefreshTooltips() end
+    if self.RefreshUpgradeIndicators then self:RefreshUpgradeIndicators() end
+end
+
+-- A single main profile drives optional upgrade markers independently of its
+-- tooltip visibility. No profile is chosen implicitly on import or deletion.
+function FW:GetMainProfile()
+    self:Initialize()
+    return self.DB.profiles[self.DB.options.mainProfileID]
+end
+
+function FW:SetMainProfile(id)
+    self:Initialize()
+    if id ~= nil and (type(id) ~= "string" or not self.DB.profiles[id]) then
+        return nil, "Profile not found."
+    end
+    if self.DB.options.mainProfileID ~= id then
+        self.DB.options.mainProfileID = id
+        self:NotifyChanged()
+    end
+    return true
+end
+
+function FW:SetUpgradeOption(key, value)
+    self:Initialize()
+    if not upgradeOptions[key] then return nil, "Unknown upgrade-arrow option." end
+    if type(value) ~= "boolean" then return nil, "Upgrade-arrow options must be true or false." end
+    if self.DB.options[key] ~= value then
+        self.DB.options[key] = value
+        self:NotifyChanged()
+    end
+    return true
 end
 
 function FW:CreateProfile(name, weights)
@@ -276,6 +313,7 @@ function FW:DeleteProfile(id)
     self:Initialize()
     if not self.DB.profiles[id] then return nil, "Profile not found." end
     self.DB.profiles[id] = nil
+    if self.DB.options.mainProfileID == id then self.DB.options.mainProfileID = nil end
     for index = #self.DB.profileOrder, 1, -1 do
         if self.DB.profileOrder[index] == id then table.remove(self.DB.profileOrder, index) end
     end
@@ -563,6 +601,7 @@ function FW:InvalidateItem(link)
     if not key then return false end
     local cache = self.DB.cache
     cache.items[key], cache.scores[key] = nil, nil
+    if self.InvalidateUpgradeComparisons then self:InvalidateUpgradeComparisons() end
     for index = #cache.itemOrder, 1, -1 do if cache.itemOrder[index] == key then table.remove(cache.itemOrder, index) end end
     cache.order = cache.itemOrder
     return true

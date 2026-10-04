@@ -1,4 +1,4 @@
-# ZwykValues 0.1.4
+# ZwykValues 0.1.5
 
 A standalone stat-weight addon written from scratch for WoW Forever. No Pawn code, Pawn dependency, third-party libraries, or online item database is required.
 
@@ -78,6 +78,22 @@ Rings and trinkets show both replacement choices. A two-handed weapon is compare
 
 An empty slot has score zero; a zero or negative baseline displays **percentage n/a** unless the scores are equal, which displays `=0.00 (+0.0%)`. Equipped and native shopping tooltips show their own item scores without recursively repeating candidate comparisons. Comparisons involving a partial candidate or equipped baseline display a warning because the missing stats could change the result. The addon evaluates item stats, not whether your class can equip every item you inspect.
 
+## Optional upgrade arrows
+
+In `/zv`, select a profile and check **Main for upgrade arrows** in the left-hand **Upgrade arrows** panel. Exactly one profile can be main. Choosing another replaces it; clearing the checkbox or deleting that profile leaves no main. Its tooltip **Active** setting is independent. Main selection and location toggles are saved account-wide.
+
+Enable any of the three locations separately (all are off initially):
+
+- **In bags**: a green arrow at the upper-left corner of native carried-bag item icons, including combined bags.
+- **Loot rolls**: a green arrow on the item icon in native loot-roll windows.
+- **Chat item links**: an arrow immediately after item links in newly received chat messages.
+
+An arrow means the item scores higher than an equipped replacement under the main profile. Rings/trinkets need to beat at least one equipped slot; two-handed weapons use the combined main/off-hand score. Comparisons wait for main-hand compatibility where needed. Parsing or stat-unit issues suppress the affected upgrade decision, while tooltips retain their known subtotal and diagnostic warning.
+
+Bag/roll arrows refresh after item data loads, equipment changes (including enchants), bag changes, and profile/option edits. They clear when an icon is reused or a roll ends. Chat arrows are a snapshot when each message arrives: an uncached item link requests data and stays unmarked in that message; later messages can show its arrow once the data is available. Existing chat history is retained as originally displayed.
+
+Native Blizzard bags and loot-roll windows are supported. Third-party bag addons can integrate their buttons explicitly with `ZwykValues:RegisterUpgradeItemButton(button, linkProvider)` and re-register after their own slot updates; `linkProvider(button)` must return the current full item link or nil.
+
 After upgrading to 0.1.4, parser-versioned cache keys automatically refresh item stats and scores. Issue exports intentionally preserve historical problems: use `/zv clearissues`, then hover the items again to collect a report for the new parser.
 
 ## Debugging unrecognized stats
@@ -123,6 +139,8 @@ lua tests/test_tooltips.lua
 lua tests/test_bootstrap.lua
 lua tests/test_integration.lua
 lua tests/test_ui.lua
+lua tests/test_upgrades.lua
+lua tests/test_indicators.lua
 ```
 
 `luatex --luaonly` can also run the tests when a standalone Lua executable is unavailable. Production modules use Lua 5.1-compatible syntax.
@@ -134,6 +152,8 @@ lua tests/test_ui.lua
 - `Core.lua`: profile management, import/export, scoring, and score-cache invalidation.
 - `Items.lua`: item variants, client data loading, normalization, and static tooltip parsing.
 - `Compare.lua`: equipped slot comparisons.
+- `Upgrades.lua`: main-profile upgrade decisions and local chat-link decoration.
+- `Indicators.lua`: native bag/loot-roll overlays and refresh hooks.
 - `Tooltips.lua`: native tooltip hooks and refresh handling.
 - `Textures/ArrowUp.tga` and `Textures/ArrowDown.tga`: tooltip comparison indicators.
 - `UI.lua`: profile and weight editor.
