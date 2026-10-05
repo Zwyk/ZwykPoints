@@ -101,6 +101,7 @@ for _, name in ipairs({ "SetBackdrop", "SetBackdropColor", "SetBackdropBorderCol
     methods[name] = function() end
 end
 function methods:SetMaxLetters(value) self.maxLetters=value end
+function methods:SetFrameStrata(value) self.strata=value end
 UIParent = widget("Frame", "UIParent")
 UIParent:SetSize(1920, 1080)
 UISpecialFrames, SlashCmdList, StaticPopupDialogs = {}, {}, {}
@@ -222,6 +223,162 @@ equal(profile.color.g, 0x34 / 255, "valid HEX saves green")
 equal(profile.color.b, 0x56 / 255, "valid HEX saves blue")
 click("Rename")
 equal(profile.name, "Draft name", "rename commits name")
+
+local swatch = find(function(control) return control.isColorSwatch end)
+local modernPicker = widget("Frame", nil, UIParent)
+modernPicker:Hide()
+function modernPicker:GetColorRGB() return table.unpack(self.rgb) end
+function modernPicker:SetupColorPickerAndShow(info)
+    self.info = info
+    self.swatchFunc, self.cancelFunc = info.swatchFunc, info.cancelFunc
+    self.rgb = { info.r, info.g, info.b }
+    -- The native picker fires OnColorSelect while setting its initial RGB.
+    self.swatchFunc()
+    self:Show()
+end
+ColorPickerFrame = modernPicker
+local pickerRevision = profile.revision
+userText(name, "Picker draft name")
+userText(strength, "7.25")
+userText(color, "#ABCDEF")
+swatch:Fire("OnClick")
+check(modernPicker:IsShown(), "clicking the color square opens the native picker")
+equal(modernPicker.strata, "DIALOG", "native picker is raised above the main editor")
+check(modernPicker:GetFrameLevel() > FW.UI:GetFrameLevel(), "native picker has a higher frame level")
+equal(modernPicker.info.hasOpacity, false, "profile colors do not expose an opacity slider")
+equal(modernPicker.info.r, 0x12 / 255, "picker starts from the saved profile color")
+equal(color:GetText(), "#ABCDEF", "opening a picker preserves unsaved HEX text")
+equal(profile.color.r, 0x12 / 255, "native setup callback does not save or replace a draft")
+modernPicker.rgb = { .25, .5, .75 }
+modernPicker.info.swatchFunc()
+equal(profile.color.r, .25, "modern picker saves selected colors immediately")
+equal(profile.color.g, .5, "modern picker saves the selected green channel")
+equal(profile.color.b, .75, "modern picker saves the selected blue channel")
+equal(color:GetText(), "#4080BF", "picker selection updates HEX text")
+equal(swatch.children[1].color[1], 0x40 / 255, "picker selection updates the color square to its displayed HEX")
+equal(name:GetText(), "Picker draft name", "picker saves preserve the draft profile name")
+equal(strength:GetText(), "7.25", "picker saves preserve unsaved stat weights")
+equal(profile.name, "Draft name", "picker does not save draft names")
+equal(profile.weights.strength, 4, "picker does not save draft weights")
+equal(profile.revision, pickerRevision, "color changes do not invalidate stat-score revisions")
+-- Classic Cancel hides the frame before calling cancelFunc.
+modernPicker:Hide()
+modernPicker.info.cancelFunc({ r = 0, g = 0, b = 0 })
+equal(profile.color.r, 0x12 / 255, "Cancel restores original saved red despite supplied callback values")
+equal(profile.color.g, 0x34 / 255, "Cancel restores original saved green")
+equal(profile.color.b, 0x56 / 255, "Cancel restores original saved blue")
+equal(color:GetText(), "#ABCDEF", "Cancel restores pre-picker HEX draft")
+FW:RefreshUI()
+equal(color:GetText(), "#ABCDEF", "Cancel preserves HEX draft state on later refresh")
+equal(name:GetText(), "Picker draft name", "Cancel preserves the name draft")
+equal(strength:GetText(), "7.25", "Cancel preserves the weight draft")
+equal(profile.revision, pickerRevision, "Cancel leaves score revisions unchanged")
+swatch:Fire("OnClick")
+modernPicker.rgb = { .1, .2, .3 }
+modernPicker.info.swatchFunc()
+modernPicker:Hide() -- Accept: subsequent picker open must keep the accepted RGB.
+swatch:Fire("OnClick")
+equal(modernPicker.info.r, .1, "reopening after acceptance keeps the saved picker color")
+local staleSelection = modernPicker.info
+modernPicker.rgb = { .6, .7, .8 }
+modernPicker.info.swatchFunc()
+local other = assert(FW:CreateProfile("Picker other profile", {}))
+local otherColor = other.color.r
+find(function(control) return control.kind == "Button" and control.profileID == other.id end):Fire("OnClick")
+check(not modernPicker:IsShown(), "switching profiles closes the previous profile's picker")
+equal(profile.color.r, .1, "switching profiles cancels the pending picker edit")
+modernPicker.rgb = { .9, .9, .9 }
+staleSelection.swatchFunc()
+staleSelection.cancelFunc()
+equal(other.color.r, otherColor, "stale picker callbacks cannot recolor the newly selected profile")
+equal(profile.color.r, .1, "stale picker callbacks cannot change the original profile")
+find(function(control) return control.kind == "Button" and control.profileID == profile.id end):Fire("OnClick")
+FW:DeleteProfile(other.id)
+local deleted = assert(FW:CreateProfile("Picker deletion profile", {}))
+find(function(control) return control.kind == "Button" and control.profileID == deleted.id end):Fire("OnClick")
+swatch:Fire("OnClick")
+local deletedSession = modernPicker.info
+FW:DeleteProfile(deleted.id)
+check(not modernPicker:IsShown(), "deleting a profile closes its picker")
+deletedSession.swatchFunc()
+deletedSession.cancelFunc()
+equal(FW.DB.profiles[deleted.id], nil, "stale callbacks cannot recreate a deleted profile")
+equal(profile.color.r, .1, "deletion callbacks cannot recolor the remaining profile")
+
+ColorPickerFrame = nil
+local loadedPicker
+C_AddOns = { LoadAddOn = function(addon) loadedPicker = addon return false end }
+local beforeUnavailable = profile.color.r
+check(pcall(swatch.Fire, swatch, "OnClick"), "missing native picker is handled without Lua errors")
+equal(loadedPicker, "Blizzard_ColorPickerFrame", "missing picker uses the correct native addon loader")
+equal(profile.color.r, beforeUnavailable, "missing picker leaves saved colors intact")
+C_AddOns.LoadAddOn = function(addon) loadedPicker = addon ColorPickerFrame = modernPicker return true end
+swatch:Fire("OnClick")
+check(modernPicker:IsShown(), "native picker can be loaded when its addon is unavailable initially")
+modernPicker:Hide()
+modernPicker.info.cancelFunc()
+C_AddOns = nil
+
+local legacyPicker = widget("ColorSelect", nil, UIParent)
+legacyPicker:Hide()
+function legacyPicker:GetColorRGB() return table.unpack(self.rgb) end
+function legacyPicker:SetColorRGB(r, g, b)
+    self.rgb = { r, g, b }
+    if self.func then self.func() end
+end
+ColorPickerFrame = legacyPicker
+userText(color, "#FEDCBA")
+swatch:Fire("OnClick")
+check(legacyPicker:IsShown(), "older picker API has a guarded compatibility path")
+equal(color:GetText(), "#FEDCBA", "legacy initial RGB callback preserves HEX drafts")
+equal(legacyPicker.hasOpacity, false, "legacy picker disables opacity")
+legacyPicker:SetColorRGB(.2, .4, .6)
+equal(profile.color.r, .2, "legacy picker saves changes")
+equal(color:GetText(), "#336699", "legacy picker updates HEX")
+legacyPicker:Hide()
+legacyPicker.cancelFunc(legacyPicker.previousValues)
+equal(profile.color.r, .1, "legacy Cancel restores the original saved color")
+equal(color:GetText(), "#FEDCBA", "legacy Cancel restores the HEX draft")
+equal(profile.revision, pickerRevision, "all picker paths leave stat-score revisions unchanged")
+
+swatch:Fire("OnClick")
+legacyPicker:SetColorRGB(.4, .5, .6)
+local staleLegacySwatch, staleLegacyCancel = legacyPicker.func, legacyPicker.cancelFunc
+-- An older addon replaces active func/cancelFunc, leaving unused swatchFunc.
+legacyPicker.func, legacyPicker.cancelFunc = function() end, function() end
+staleLegacyCancel()
+equal(profile.color.r, .4, "foreign legacy picker ownership prevents stale cancellation")
+FW.UI:Hide()
+check(legacyPicker:IsShown(), "closing the editor does not hide another addon's legacy picker")
+equal(profile.color.r, .4, "foreign picker replacement keeps the last saved profile color")
+legacyPicker.rgb = { .8, .8, .8 }
+staleLegacySwatch()
+equal(profile.color.r, .4, "foreign legacy picker callbacks cannot save another color")
+FW.UI:Show()
+
+ColorPickerFrame = modernPicker
+swatch:Fire("OnClick")
+modernPicker.rgb = { .3, .6, .9 }
+modernPicker.info.swatchFunc()
+local staleModern = modernPicker.info
+modernPicker.swatchFunc, modernPicker.cancelFunc = function() end, function() end
+staleModern.cancelFunc()
+equal(profile.color.r, .3, "foreign modern picker ownership prevents stale cancellation")
+FW.UI:Hide()
+check(modernPicker:IsShown(), "closing the editor does not hide another addon's modern picker")
+modernPicker.rgb = { .8, .8, .8 }
+staleModern.swatchFunc()
+equal(profile.color.r, .3, "foreign modern picker callbacks cannot save another color")
+FW.UI:Show()
+
+local brokenPicker = widget("Frame", nil, UIParent)
+brokenPicker:Hide()
+brokenPicker.GetColorRGB = modernPicker.GetColorRGB
+brokenPicker.SetupColorPickerAndShow = function() error("unsupported picker setup") end
+ColorPickerFrame = brokenPicker
+check(pcall(swatch.Fire, swatch, "OnClick"), "native picker setup errors are handled without a Lua error")
+equal(profile.color.r, .3, "failed native picker setup preserves saved colors")
+ColorPickerFrame = modernPicker
 
 local debug = find(function(control) return control.optionKey == "debugUnknownStats" end)
 check(not debug:GetChecked(), "unknown-stat debug option starts disabled")
@@ -361,6 +518,8 @@ for _, dimensions in ipairs({ {930, 720}, {850, 600} }) do
     within(byText("Clear cache", "Button"), FW.UI, "cache button fits footer")
     check(ZwykValuesStatsScroll:GetHeight() >= 190, "resized editor keeps useful visible weight area")
     within(byText("Item filters", "Button"), FW.UI, "filter button fits minimum editor width")
+    within(swatch, FW.UI, "clickable color square fits minimum editor width")
+    separate(swatch, byText("Set color", "Button"), "color picker square does not overlap HEX save button")
     separate(byText("Item filters", "Button"), byText("Rating", "FontString"), "filter button leaves room for secondary-unit choices")
     within(filterDialog, FW.UI, "filter dialog fits minimum editor size")
     within(otherClasses, filterDialog, "class-restriction checkbox fits filter dialog")
@@ -394,13 +553,22 @@ click("Item filters")
 local remaining = FW:GetProfiles()
 for _, existing in ipairs(remaining) do FW:DeleteProfile(existing.id) end
 check(not byText("Item filters", "Button").enabled, "filter button is disabled without a profile")
+check(not swatch.enabled, "color picker square is disabled without a profile")
 check(not otherClasses.enabled and not weaponFilter.enabled and not armorFilter.enabled, "open filters disable their controls when the profile is deleted")
 local restored = assert(FW:CreateProfile("Restored profile", {}))
 check(byText("Item filters", "Button").enabled, "creating a profile re-enables filters")
+check(swatch.enabled, "creating a profile re-enables the color picker")
 check(otherClasses.enabled and weaponFilter.enabled and armorFilter.enabled, "new profile enables existing dialog controls")
 check(otherClasses:GetChecked() and weaponFilter:GetChecked() and armorFilter:GetChecked(), "new profile restores default inclusion")
 click("Done")
 click("Item filters")
+ColorPickerFrame = modernPicker
+local restoredColor = restored.color.r
+swatch:Fire("OnClick")
+modernPicker.rgb = { .9, .8, .7 }
+modernPicker.info.swatchFunc()
 FW.UI:Hide()
 check(not filterDialog:IsShown(), "closing the editor hides its filter dialog")
+check(not modernPicker:IsShown(), "closing the editor hides its own color picker")
+equal(restored.color.r, restoredColor, "closing the editor cancels the current picker edit")
 print("UI: " .. passed .. " checks passed (widget smoke and approximate geometry).")

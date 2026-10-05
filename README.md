@@ -1,4 +1,4 @@
-# ZwykValues 0.1.7
+# ZwykValues 0.1.8
 
 A standalone stat-weight addon written from scratch for WoW Forever. No Pawn code, Pawn dependency, third-party libraries, or online item database is required.
 
@@ -21,7 +21,7 @@ WoW stores each addon's SavedVariables in a file named after that addon, so rena
 
 ## Profiles
 
-Create, copy, rename, or delete profiles in the left column. Set an individual tooltip color and toggle **Active** for every profile you want shown. Multiple profiles can be active together.
+Create, copy, rename, or delete profiles in the left column. Set an individual tooltip color and toggle **Active** for every profile you want shown. Multiple profiles can be active together. Click the color square to open the native color picker; selecting a color saves it for that profile, and **Cancel** restores its original color. The hexadecimal field and **Set color** remain available.
 
 Edit weights in the grouped stat editor and apply them. Positive, zero, negative, and fractional weights are supported. The initial **My profile** is empty: it contains no invented class or specialization weights.
 
@@ -73,6 +73,8 @@ Every active profile adds one row with its name and score in the profile color. 
 `Mageladin    2.56  ↑+1.52 (+146.2%)`
 
 A smaller, indented **Base** subline appears beneath each profile. It scores the same item without its enchant and compares it against the equipped items with their enchants removed too. The client supplies the unenchanted stats directly; the addon does not subtract guessed enchant bonuses. Intrinsic item variants, including random-suffix stats, remain part of the base value. Equipped and shopping tooltips show the base score alone. The full score above still includes recognized enchants.
+
+Version 0.1.8 accepts Forever's named item-quality colors (`|cnIQ2:`) as well as hexadecimal link colors, fixing **Base: Invalid item link** for those links. Both candidate and equipped item links retain their complete variant data when removing the enchant.
 
 The up/down indicators use packaged arrow textures so they display even when the tooltip font has no Unicode arrow glyphs. Equality uses `=`. Two spaces separate the score from the first comparison. Multiple replacement choices share the same row, in equipped slot order:
 

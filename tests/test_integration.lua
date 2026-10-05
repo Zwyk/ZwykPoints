@@ -21,7 +21,10 @@ local variant="item:100:0:0:0:0:0:-7:123:60"
 local scanned="item:102:0:0:0:0:0:0:0:60"
 local partial="item:103:0:0:0:0:0:0:0:60"
 local reads,scans,scoreCalls=0,0,0
-local function definition(link) return assert(itemDB[link],"Unexpected item " .. tostring(link)) end
+local function definition(link)
+    local payload=type(link)=="string" and link:match("(item:[^|%s]+)")
+    return assert(itemDB[payload],"Unexpected item " .. tostring(link))
+end
 local function sourceLines(link)
     local item=definition(link)
     local lines = {item.name,"+" .. item.strength .. " Strength",
@@ -169,8 +172,8 @@ baseline=oldBaseline
 
 -- The full pipeline can report a downgrade with enchants and an upgrade on
 -- the base subline, stripping the equipped enchant as well as the candidate.
-baseline="item:105:8481:0:0:0:0:0:0:60"
-GameTooltip:SetHyperlink("item:104:8481:0:0:0:0:0:0:60")
+baseline="|cnIQ2:|Hitem:105:8481:0:0:0:0:0:0:60|h[Enchanted old helmet]|h|r"
+GameTooltip:SetHyperlink("|cnIQ2:|Hitem:104:8481:0:0:0:0:0:0:60|h[Enchanted new helmet]|h|r")
 assert(findLine("Melee").right=="55.00  |cffff5959|TInterface\\AddOns\\ZwykValues\\Textures\\ArrowDown:12:12:0:0|t-9.00 (-14.1%)|r")
 assert(findLine("  Base").right=="40.00  |cff40ff59|TInterface\\AddOns\\ZwykValues\\Textures\\ArrowUp:10:10:0:0|t+6.00 (+17.6%)|r")
 assert(not findLine("Partial stat data; /zv inspect or /zv exportissues."))

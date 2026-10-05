@@ -4,6 +4,7 @@ local _, FW = ...
 -- the editor while cache updates or profile visibility changes refresh the UI.
 local UI
 local refreshItemFilters
+local closeColorPicker
 local ROW_HEIGHT = 30
 local unpack = unpack or table.unpack
 local finite = function(value)
@@ -141,6 +142,9 @@ end
 
 local function refreshEditor(force)
     local profile = selectedProfile()
+    if UI.colorPickerSession and (not profile or UI.colorPickerSession.profile ~= profile) then
+        closeColorPicker(true)
+    end
     local enabled = profile ~= nil
     for _, control in ipairs(UI.profileControls) do
         setEnabled(control, enabled)
@@ -222,7 +226,103 @@ local function applyWeights()
     commit({ weights = weights }, "weights", "Weights saved. Cached scores will use the updated weights.")
 end
 
+-- The game has one shared picker. Keep callbacks tied to the profile that
+-- opened it, and ignore callbacks after it is replaced or that profile is gone.
+local function ownsColorPicker(session)
+    local picker = session.picker
+    return picker[session.callbackKey] == session.swatch and picker.cancelFunc == session.cancel
+end
+
+closeColorPicker = function(cancel)
+    local session = UI and UI.colorPickerSession
+    if not session then return end
+    local picker = session.picker
+    local shown = ownsColorPicker(session) and picker.IsShown and picker:IsShown()
+    if cancel and shown then session.cancel() end
+    UI.colorPickerSession = nil
+    session.closed = true
+    if shown and picker.Hide then picker:Hide() end
+end
+
+local function showColorPicker()
+    local profile = selectedProfile()
+    if not profile then return end
+    closeColorPicker(true)
+    local picker = ColorPickerFrame
+    if not picker then
+        local loadAddon = C_AddOns and C_AddOns.LoadAddOn or LoadAddOn
+        if loadAddon then pcall(loadAddon, "Blizzard_ColorPickerFrame") end
+        picker = ColorPickerFrame
+    end
+    if not picker or not picker.GetColorRGB or not (picker.SetupColorPickerAndShow or (picker.SetColorRGB and picker.Show)) then
+        status("The game's color picker is unavailable. Enter a HEX color and use Set color.", "error")
+        return
+    end
+    local saved = profile.color or { r = 1, g = 1, b = 1 }
+    local original = { r = saved.r, g = saved.g, b = saved.b }
+    local session = {
+        picker = picker, profile = profile, setup = true,
+        draft = UI.color:GetText(), dirtyColor = UI.dirtyColor,
+        callbackKey = picker.SetupColorPickerAndShow and "swatchFunc" or "func",
+    }
+    UI.colorPickerSession = session
+    local function saveColor(color, restoreDraft)
+        if not FW.DB or not FW.DB.profiles or FW.DB.profiles[profile.id] ~= profile then return end
+        local wasCommitting = UI.committing
+        UI.committing = true
+        local ok, err = FW:UpdateProfile(profile.id, { color = color })
+        UI.committing = wasCommitting
+        if not ok then status(err or "Could not save the tooltip color.", "error") return end
+        if UI.selectedID == profile.id then
+            UI.loading = true
+            UI.dirtyColor = restoreDraft and session.dirtyColor or false
+            UI.color:SetText(restoreDraft and session.draft or hexColor(color))
+            UI.loading = false
+            previewColor(parseColor(UI.color:GetText()) or color)
+        end
+        FW:RefreshUI()
+        status(restoreDraft and "Original tooltip color restored." or "Tooltip color saved.", "success")
+    end
+    session.swatch = function()
+        if session.closed or session.setup or UI.colorPickerSession ~= session then return end
+        if not ownsColorPicker(session) then return end
+        local ok, r, g, b = pcall(picker.GetColorRGB, picker)
+        if ok and finite(r) and finite(g) and finite(b) then saveColor({ r = r, g = g, b = b }, false) end
+    end
+    session.cancel = function()
+        if session.closed or UI.colorPickerSession ~= session or not ownsColorPicker(session) then return end
+        session.closed = true
+        UI.colorPickerSession = nil
+        saveColor(original, true)
+    end
+    if picker.SetFrameStrata then picker:SetFrameStrata("DIALOG") end
+    if picker.SetFrameLevel then
+        picker:SetFrameLevel(math.max(picker.GetFrameLevel and picker:GetFrameLevel() or 0, UI.frame:GetFrameLevel() + 30))
+    end
+    local ok
+    if picker.SetupColorPickerAndShow then
+        ok = pcall(picker.SetupColorPickerAndShow, picker, {
+            r = original.r, g = original.g, b = original.b,
+            hasOpacity = false, swatchFunc = session.swatch, cancelFunc = session.cancel,
+        })
+    else
+        if picker.Hide then picker:Hide() end
+        -- Older Classic clients use func; newer ones use swatchFunc.
+        picker.func, picker.swatchFunc = session.swatch, session.swatch
+        picker.cancelFunc, picker.opacityFunc, picker.hasOpacity = session.cancel, nil, false
+        picker.previousValues = { r = original.r, g = original.g, b = original.b }
+        ok = pcall(picker.SetColorRGB, picker, original.r, original.g, original.b)
+        if ok then ok = pcall(picker.Show, picker) end
+    end
+    session.setup = false
+    if not ok then
+        closeColorPicker(false)
+        status("Could not open the game's color picker. Enter a HEX color and use Set color.", "error")
+    end
+end
+
 local function selectProfile(id, reveal)
+    closeColorPicker(true)
     UI.selectedID = id
     UI.revealSelected = reveal
     refreshEditor(true)
@@ -803,10 +903,16 @@ local function createUI()
     UI.color:SetScript("OnEnterPressed", function(self) self:ClearFocus() setColor() end)
     UI.colorButton = button(UI.right, "Set color", 85, setColor)
     UI.colorButton:SetPoint("LEFT", UI.color, "RIGHT", 12, 0)
-    UI.colorSwatch = UI.right:CreateTexture(nil, "ARTWORK")
-    UI.colorSwatch:SetSize(19, 19)
-    UI.colorSwatch:SetPoint("LEFT", UI.colorButton, "RIGHT", 10, 0)
-    hint(UI.color, "Tooltip color", "Enter a six-digit hexadecimal color, for example #66CCFF. Click Set color to save it.")
+    UI.colorPicker = CreateFrame("Button", nil, UI.right)
+    UI.colorPicker:SetSize(19, 19)
+    UI.colorPicker:SetPoint("LEFT", UI.colorButton, "RIGHT", 10, 0)
+    UI.colorPicker:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square")
+    UI.colorPicker:SetScript("OnClick", showColorPicker)
+    UI.colorPicker.isColorSwatch = true
+    UI.colorSwatch = UI.colorPicker:CreateTexture(nil, "ARTWORK")
+    UI.colorSwatch:SetAllPoints()
+    hint(UI.colorPicker, "Choose tooltip color", "Click to open the game's color picker. Changes save immediately; Cancel restores the previous color. Your unsaved weights and profile name are kept.")
+    hint(UI.color, "Tooltip color", "Enter a six-digit hexadecimal color, for example #66CCFF. Click Set color to save it, or click the colored square to open the color picker.")
 
     label(UI.right, "Secondary units", 11, { 0.76, 0.82, 0.9 }):SetPoint("TOPLEFT", 15, -106)
     local function unitButton(text, x, unit)
@@ -851,7 +957,7 @@ local function createUI()
     UI.exportWeights:SetPoint("RIGHT", UI.export, "LEFT", -6, 0)
     hint(UI.export, "Export profile", "Exports the saved profile with its name, color, units and item filters. Apply edited weights before exporting.")
     hint(UI.exportWeights, "Export weights", "Exports the saved weights using Sixty Upgrades keys. Name, color, unit and item filter metadata are omitted.")
-    UI.profileControls = { UI.name, UI.rename, UI.active, UI.main, UI.color, UI.colorButton, UI.percent, UI.rating, UI.itemFilters, UI.apply }
+    UI.profileControls = { UI.name, UI.rename, UI.active, UI.main, UI.color, UI.colorButton, UI.colorPicker, UI.percent, UI.rating, UI.itemFilters, UI.apply }
     buildWeightFields()
 
     local note = label(frame, "Fixed weights ignore caps, procs, sets and rotations.", 10, { 0.66, 0.71, 0.79 })
@@ -896,6 +1002,7 @@ local function createUI()
         layoutWeights()
     end)
     frame:SetScript("OnHide", function()
+        closeColorPicker(true)
         if UI.dialog then UI.dialog:Hide() end
         if UI.filterDialog then UI.filterDialog:Hide() end
         UI.name:ClearFocus()

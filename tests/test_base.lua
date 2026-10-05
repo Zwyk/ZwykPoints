@@ -56,8 +56,14 @@ local suffix = ":0:0:0:0:-42:9:22:1486::1:2:12755:13001:1:28:5254:::Player-4618-
 local fullLink = "item:100:8481" .. suffix
 local baseLink = "item:100:0" .. suffix
 local hyperlink = "|cff1eff00|H" .. fullLink .. "|h[Ring of the Knight]|h|r"
+local namedHyperlink = "|cnIQ2:|H" .. fullLink .. "|h[Ring of the Knight]|h|r"
 equal(FW:GetBaseItemLink(fullLink), baseLink, "every field after the enchant is preserved")
 equal(FW:GetBaseItemLink(hyperlink), baseLink, "colored item hyperlink")
+equal(FW:GetBaseItemLink(namedHyperlink), baseLink, "native named item-quality color")
+equal(FW:GetBaseItemLink("|cnIQ4:|H" .. fullLink .. "|h[Ring of the Knight]|h|r"), baseLink)
+local clientPayload = "item:15509:8481:::::::22:1486::1:1:12734:1:28:5254:::::"
+equal(FW:GetBaseItemLink("|cnIQ2:|H" .. clientPayload .. "|h[Grunt's Handwraps of Magic]|h|r"),
+    "item:15509:0:::::::22:1486::1:1:12734:1:28:5254:::::", "reported Forever variant retains every non-enchant field")
 equal(FW:GetBaseItemLink("|H" .. fullLink .. "|h[Ring of the Knight]|h"), baseLink)
 equal(FW:GetBaseItemLink(baseLink), baseLink, "already unenchanted links are stable")
 equal(FW:GetBaseItemLink("item:12"), "item:12:0")
@@ -68,6 +74,7 @@ equal(FW:GetBaseItemLink(12.0), "item:12:0")
 for _, bad in ipairs({ "", "not an item:12", "item:0", "item:-12", "item:12oops",
     "item:12:enchantment", "item:12:8 bad", "item:12:8:0|", "item:12:8:0\n",
     "item:12:8:bad@field", "|cffZZZZZZ|Hitem:12:8|h[Bad]|h|r", {}, false,
+    "|cnIQ2|Hitem:12:8|h[Bad]|h|r", "|cn:|Hitem:12:8|h[Bad]|h|r",
     0, -1, 12.5, math.huge, -math.huge, 0 / 0 }) do
     equal(FW:GetBaseItemLink(bad), nil, "malformed item link is rejected safely")
 end
@@ -104,6 +111,8 @@ addItem(fullLink, "INVTYPE_FINGER", 10, 5)
 local profile = assert(FW:CreateProfile("Base regression", { strength = 1 }))
 local fullScore, fullRecord = FW:GetScore(hyperlink, profile)
 local baseScore, baseRecord = FW:GetBaseScore(hyperlink, profile)
+equal(FW:GetScore(namedHyperlink, profile), fullScore, "named colors keep full-score behavior")
+equal(FW:GetBaseScore(namedHyperlink, profile), baseScore, "named colors can read the existing unenchanted cache")
 equal(fullScore, 15, "normal scoring still includes a recognized enchant")
 equal(baseScore, 10, "base score is read from the unenchanted variant")
 equal(baseRecord.link, baseLink)
@@ -141,7 +150,7 @@ equal(statCalls[unknownBase], 1)
 local ring1, ring2 = "item:101:8481" .. suffix, "item:102:8481" .. suffix
 local ring1Base = addItem(ring1, "INVTYPE_FINGER", 8, 12)
 local ring2Base = addItem(ring2, "INVTYPE_FINGER", 12, 1)
-equipped[11], equipped[12] = ring1, ring2
+equipped[11], equipped[12] = "|cnIQ2:|H" .. ring1 .. "|h[Equipped ring]|h|r", ring2
 local result = assert(FW:CompareItem(fullLink, profile))
 equal(result.score, 15)
 equal(result.comparisons[1].baseline, 20); equal(result.comparisons[1].delta, -5)
@@ -151,7 +160,7 @@ equal(result.score, 10); equal(#result.comparisons, 2)
 equal(result.comparisons[1].baseline, 8); equal(result.comparisons[1].delta, 2)
 equal(result.comparisons[1].percent, 25)
 equal(result.comparisons[2].baseline, 12); equal(result.comparisons[2].delta, -2)
-equal(result.comparisons[1].links[1], ring1, "comparison retains the actual equipped link")
+equal(result.comparisons[1].links[1], equipped[11], "comparison retains the actual equipped link")
 equal(result.hasIssues, false)
 equal(statCalls[ring1Base], 1); equal(statCalls[ring2Base], 1)
 equipped[12] = nil

@@ -44,7 +44,10 @@ function FW:GetBaseItemLink(link)
     elseif type(link) == "string" then
         if link:match("^item:[^|%s]+$") then payload = link
         else
-            local hyperlink = link:gsub("^|c%x%x%x%x%x%x%x%x", ""):gsub("|r$", "")
+            -- Forever also uses named quality colors (for example |cnIQ2:).
+            -- Color markup is outside the item payload and carries no stats.
+            local hyperlink = link:gsub("^|c%x%x%x%x%x%x%x%x", ""):
+                gsub("^|cn[%w_]+:", ""):gsub("|r$", "")
             payload = hyperlink:match("^|H(item:[^|%s]+)|h.-|h$")
         end
     end
