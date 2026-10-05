@@ -1,4 +1,4 @@
-# ZwykValues 0.1.8
+# ZwykValues 0.1.9
 
 A standalone stat-weight addon written from scratch for WoW Forever. No Pawn code, Pawn dependency, third-party libraries, or online item database is required.
 
@@ -102,7 +102,9 @@ An arrow means the item scores higher than an equipped replacement under the mai
 
 Bag/roll arrows refresh after item data loads, equipment changes (including enchants), bag changes, and profile/option edits. They clear when an icon is reused or a roll ends. Chat arrows are a snapshot when each message arrives: an uncached item link requests data and stays unmarked in that message; later messages can show its arrow once the data is available. Existing chat history is retained as originally displayed.
 
-Native Blizzard bags and loot-roll windows are supported. Third-party bag addons can integrate their buttons explicitly with `ZwykValues:RegisterUpgradeItemButton(button, linkProvider)` and re-register after their own slot updates; `linkProvider(button)` must return the current full item link or nil.
+Native Blizzard bags and loot-roll windows are supported. BetterBags 0.5.14 is also supported automatically, including its bank and list-row item icons; it uses the same **Bags** checkbox and main profile, with no additional provider selection. Its arrows update when equipment, profiles or item data change, and clear when a slot is reused. Empty slots and item-browser previews are excluded.
+
+Other third-party bag addons can integrate their buttons explicitly with `ZwykValues:RegisterUpgradeItemButton(button, linkProvider)` and re-register after their own slot updates; `linkProvider(button)` must return the current full item link or nil.
 
 After upgrading to 0.1.7, parser-versioned cache keys automatically refresh item stats, type metadata and scores. Issue exports intentionally preserve historical problems: use `/zv clearissues`, then hover the items again to collect a report for the new parser.
 
@@ -154,6 +156,7 @@ lua tests/test_integration.lua
 lua tests/test_ui.lua
 lua tests/test_upgrades.lua
 lua tests/test_indicators.lua
+lua tests/test_betterbags.lua
 ```
 
 `luatex --luaonly` can also run the tests when a standalone Lua executable is unavailable. Production modules use Lua 5.1-compatible syntax.

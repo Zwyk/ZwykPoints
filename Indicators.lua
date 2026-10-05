@@ -6,6 +6,9 @@ local _, FW = ...
 local buttons, containers, hookTargets = {}, {}, {}
 local arrowTexture = "Interface\\AddOns\\ZwykValues\\Textures\\ArrowUp"
 local refreshPending = false
+local betterBagsItems = setmetatable({}, { __mode = "k" })
+local betterBagsEvents, betterBagsMessages
+local betterBagsBankBags = {}
 
 local function usable(frame)
     if not frame then return false end
@@ -29,7 +32,7 @@ local function enabled(option)
 end
 
 local function hide(entry)
-    if entry.texture then entry.texture:Hide() end
+    if entry and entry.texture then entry.texture:Hide() end
 end
 
 local function paint(button, entry)
@@ -184,6 +187,94 @@ local function installNativeHooks()
     for index = 1, 4 do registerRollFrame(_G["GroupLootFrame" .. index]) end
 end
 
+local function betterBagsLink(item)
+    if type(item) ~= "table" or item.staticData or item.isFreeSlot or
+        type(item.GetItemData) ~= "function" then return end
+    local ok, data = pcall(item.GetItemData, item)
+    if not ok or type(data) ~= "table" or data.isItemEmpty or data.isFreeSlot or data.isItemGap then return end
+    local bag, slot = data.bagid, data.slotid
+    local lastBag = NUM_TOTAL_EQUIPPED_BAG_SLOTS or NUM_TOTAL_BAG_FRAMES or NUM_BAG_SLOTS or 4
+    if (issecretvalue and (issecretvalue(bag) or issecretvalue(slot))) or
+        type(bag) ~= "number" or bag ~= math.floor(bag) or
+        (not betterBagsBankBags[bag] and (bag < 0 or bag > lastBag)) or
+        type(slot) ~= "number" or slot < 1 or slot ~= math.floor(slot) then return end
+    local link = data.itemInfo and data.itemInfo.itemLink
+    if (issecretvalue and issecretvalue(link)) or type(link) ~= "string" or not link:find("item:", 1, true) then return end
+    return link
+end
+
+local function updateBetterBagsItem(_, item, decoration)
+    local record = betterBagsItems[item]
+    if not betterBagsLink(item) or not usable(decoration) then
+        if record then record.cleared = true; hide(buttons[record.button]) end
+        return
+    end
+    if not record then record = {}; betterBagsItems[item] = record end
+    if record.button and record.button ~= decoration then hide(buttons[record.button]) end
+    record.button, record.cleared = decoration, false
+    register(decoration, function(button)
+        if record.cleared or record.button ~= button then return end
+        return betterBagsLink(item)
+    end, "upgradeBags", item.frame, decoration.IconTexture or decoration.icon or decoration.Icon)
+end
+
+local function clearBetterBagsItem(_, item, decoration)
+    -- Clearing is sent before BetterBags resets its live data.
+    local record = betterBagsItems[item]
+    if record then record.cleared = true; hide(buttons[record.button]) end
+    if buttons[decoration] then hide(buttons[decoration]) end
+end
+
+local function refreshBetterBags()
+    if not LibStub then return end
+    local ok, ace = pcall(function() return LibStub("AceAddon-3.0", true) end)
+    if not ok or not ace or type(ace.GetAddon) ~= "function" then return end
+    local loaded, addon = pcall(ace.GetAddon, ace, "BetterBags", true)
+    if not loaded or not addon or type(addon.GetModule) ~= "function" then return end
+    local function module(name)
+        local found, value = pcall(addon.GetModule, addon, name, true)
+        if found then return value end
+    end
+    local events, items, themes, context = module("Events"), module("ItemFrame"), module("Themes"), module("Context")
+    -- Modules exist before OnInitialize; RegisterMessage needs initialized maps.
+    if not events or type(events._messageMap) ~= "table" or type(events.RegisterMessage) ~= "function" or
+        not items or type(items.buttonsBySlotkey) ~= "table" or not themes or
+        type(themes.GetItemButton) ~= "function" or not context or type(context.New) ~= "function" then return end
+    local constants = module("Constants")
+    betterBagsBankBags = {}
+    for _, name in ipairs({ "BANK_BAGS", "ACCOUNT_BANK_BAGS" }) do
+        for _, bag in pairs(constants and constants[name] or {}) do
+            if type(bag) == "number" and bag == math.floor(bag) then betterBagsBankBags[bag] = true end
+        end
+    end
+    if betterBagsEvents ~= events then betterBagsEvents, betterBagsMessages = events, {} end
+    local function subscribe(message, callback)
+        if not betterBagsMessages[message] and pcall(events.RegisterMessage, events, message, callback) then
+            betterBagsMessages[message] = true
+        end
+    end
+    subscribe("item/Updated", function(ctx, item, decoration)
+        updateBetterBagsItem(ctx, item, decoration)
+        -- Updated precedes the item's Show, including list-row icons.
+        FW:RefreshUpgradeIndicators()
+    end)
+    subscribe("item/Clearing", clearBetterBagsItem)
+    if not enabled("upgradeBags") then return end
+    local created, ctx = pcall(context.New, context, "ZwykValuesUpgradeIndicators")
+    if not created or not ctx then return end
+    local seen = {}
+    local function visit(item)
+        if type(item) ~= "table" or seen[item] then return end
+        seen[item] = true
+        if betterBagsLink(item) and visible(item.frame) then
+            local themed, decoration = pcall(themes.GetItemButton, themes, ctx, item)
+            if themed then updateBetterBagsItem(ctx, item, decoration) end
+        end
+    end
+    for _, item in pairs(items.buttonsBySlotkey) do visit(item) end
+    for item in pairs(items.activeItems or {}) do visit(item) end
+end
+
 function FW:RegisterUpgradeItemButton(button, linkProvider)
     -- Third-party bags can register their item buttons with a live provider
     -- and call this again after their own updates. They share the bags toggle.
@@ -191,6 +282,7 @@ function FW:RegisterUpgradeItemButton(button, linkProvider)
 end
 
 function FW:RefreshBagUpgradeIndicators()
+    refreshBetterBags()
     if enabled("upgradeBags") then
         visitNativeContainers(function(frame) hookContainer(frame); scanContainer(frame) end)
     end
