@@ -176,8 +176,10 @@ function FW:DecorateTooltip(tooltip, data)
     local issues, notes = false, {}
     if debugEnabled then
         local record = self:GetItem(link)
-        self:MarkUnknownStats(tooltip, record)
-        issues = hasIssues(record)
+        if not self.IsGearItem or self:IsGearItem(record) ~= false then
+            self:MarkUnknownStats(tooltip, record)
+            issues = hasIssues(record)
+        end
     end
     local equipped = false
     if tooltip.IsEquippedItem then

@@ -14,6 +14,9 @@ local itemDB={
     ["item:106:0:0:0:0:0:0:0:60"]={name="Cloth helmet",strength=20,crit=1,equipLoc="INVTYPE_HEAD",subclassID=1},
     ["item:107:0:0:0:0:0:0:0:60"]={name="Warrior helmet",strength=20,crit=1,equipLoc="INVTYPE_HEAD",classes="Warrior"},
     ["item:108:0:0:0:0:0:0:0:60"]={name="Shared helmet",strength=20,crit=1,equipLoc="INVTYPE_HEAD",classes="Warrior, Paladin"},
+    ["item:109:0:0:0:0:0:0:0:60"]={name="Strength potion",strength=99,crit=1,equipLoc="",classID=0,unknown=3},
+    ["item:110:0:0:0:0:0:0:0:60"]={name="Quest item",strength=99,crit=1,equipLoc="",classID=12},
+    ["item:111:0:0:0:0:0:0:0:60"]={name="Bag",strength=99,crit=1,equipLoc="INVTYPE_BAG",classID=1},
 }
 local candidate="item:100:0:0:0:0:0:0:0:60"
 local baseline="item:101:0:0:0:0:0:0:0:60"
@@ -42,7 +45,7 @@ UnitClass=function() return "Paladin","PALADIN" end
 GetInventoryItemLink=function(_,slot) if slot==1 then return baseline end end
 GetItemInfo=function(link)
     local item=definition(link)
-    return item.name,link,3,60,60,"Armor","Plate",1,item.equipLoc,nil,nil,4,item.subclassID or 4
+    return item.name,link,3,60,60,"Armor","Plate",1,item.equipLoc,nil,nil,item.classID or 4,item.subclassID or 4
 end
 C_Item={
     GetItemInfo=GetItemInfo,
@@ -213,6 +216,26 @@ UnitClass=function() return "Paladin","PALADIN" end
 assert(FW:UpdateProfile(one.id,{itemFilters={armor={["1"]=true},includeOtherClasses=true}}))
 GameTooltip:SetHyperlink(cloth)
 assert(findLine("Melee").right:find("70.00",1,true) and FW:IsMainProfileUpgrade(cloth))
+
+-- Native non-gear metadata suppresses values for every profile and does not
+-- turn consumable text into missing-gear-stat diagnostics.
+FW.DB.options.debugUnknownStats, FW.DB.options.upgradeChat = true, true
+local beforeNonGearScores, beforeNonGearIssues = scoreCalls, FW:GetIssueReport().itemCount
+for _, id in ipairs({109,110,111}) do
+    local link="item:" .. id .. ":0:0:0:0:0:0:0:60"
+    GameTooltip:SetHyperlink(link)
+    assert(#GameTooltip.lines==#sourceLines(link), "non-gear keeps only its native tooltip lines")
+    assert(not findLine("Melee") and not findLine("Caster") and not findLine("  Base"))
+    assert(not FW:IsMainProfileUpgrade(link))
+    local chat="|H" .. link .. "|h[Non-gear]|h"
+    assert(FW:DecorateUpgradeChatMessage(chat)==chat)
+    local score, record, detail=FW:GetScore(link,one,true)
+    assert(score==nil and detail=="excluded" and next(record.stats)==nil)
+    assert(not FW.DB.cache.scores[FW:ItemKey(link)])
+end
+assert(scoreCalls==beforeNonGearScores, "non-gear is never weighted")
+assert(FW:GetIssueReport().itemCount==beforeNonGearIssues, "non-gear creates no missing-stat issues")
+FW.DB.options.debugUnknownStats = false
 
 -- SavedVariables reused by a fresh addon namespace keep valid item totals.
 local persisted=ZwykValuesDB

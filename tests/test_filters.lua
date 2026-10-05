@@ -318,4 +318,103 @@ equal(mixedTooltip.lines[4].left, "  Base")
 contains(mixedTooltip.lines[3].right, "100.00")
 contains(mixedTooltip.lines[4].right, "80.00")
 for _, line in ipairs(mixedTooltip.lines) do check(line.left ~= main.name, "excluded profile name stays hidden") end
+
+-- Gear eligibility is universal: positive stats, old cached totals and the
+-- equipped-baseline filter bypass cannot turn other item types into gear.
+allOn(main)
+allOn(independent)
+FW.DB.options.debugUnknownStats = true
+local nonGear = {
+    {label="consumable", classID=0, equipLoc=""},
+    {label="quest item", classID=12, equipLoc=""},
+    {label="equippable quest prop", classID=12, equipLoc="INVTYPE_HOLDABLE"},
+    {label="bag", classID=1, equipLoc="INVTYPE_BAG"},
+    {label="quiver", classID=11, equipLoc="INVTYPE_QUIVER"},
+    {label="ammunition", classID=6, equipLoc="INVTYPE_AMMO"},
+    {label="profession tool", classID=19, equipLoc="INVTYPE_PROFESSION_TOOL"},
+    {label="profession accessory", classID=19, equipLoc="INVTYPE_PROFESSION_GEAR"},
+    {label="unsupported weapon slot", classID=2, equipLoc="INVTYPE_PROFESSION_TOOL"},
+    {label="miscellaneous item", classID=15, equipLoc=""},
+    {label="nonwearable armor", classID=4, equipLoc=""},
+}
+for index, data in ipairs(nonGear) do
+    local full = fixture("item:" .. (4000+index) .. ":42:0", data.classID, 0, 99, data.equipLoc)
+    local base = fixture("item:" .. (4000+index) .. ":0:0", data.classID, 0, 88, data.equipLoc)
+    for _, record in ipairs({full,base}) do
+        FW.DB.cache.scores[record.key] = {[main.id]={revision=main.revision,score=999}}
+    end
+    local before = scoreCalls
+    for _, ignoreFilters in ipairs({false,true}) do
+        local score, record, detail = FW:GetScore(full.link, main, ignoreFilters)
+        equal(score, nil, data.label .. " never receives a full score")
+        equal(record, full); equal(detail, "excluded")
+        score, record, detail = FW:GetBaseScore(full.link, main, ignoreFilters)
+        equal(score, nil, data.label .. " never receives a Base score")
+        equal(record, base); equal(detail, "excluded")
+    end
+    equal(scoreCalls, before, data.label .. " is rejected before calculating or returning cached totals")
+    equal(FW:GetScore(full.link, independent), nil, "gear eligibility applies to every profile")
+    for _, baseOnly in ipairs({false,true}) do
+        local result = assert(FW:CompareItem(full.link, main, baseOnly))
+        equal(result.excluded, true); equal(#result.comparisons, 0)
+    end
+    check(not FW:IsMainProfileUpgrade(full.link), data.label .. " receives no upgrade arrow")
+    local chatLink = "|cnIQ2:|H" .. full.link .. "|h[" .. data.label .. "]|h|r"
+    equal(FW:DecorateUpgradeChatMessage(chatLink), chatLink, data.label .. " chat link stays unchanged")
+    full.partial, full.unrecognizedLines = true, {{text="Native item line"}}
+    for _, showComparisons in ipairs({true,false}) do
+        FW.DB.options.showComparisons = showComparisons
+        local itemTooltip = tooltip(full.link, "NonGearTooltip" .. index)
+        local nativeFont = {text="Native item line"}
+        function nativeFont:GetText() return self.text end
+        function nativeFont:SetText(value) self.text = value end
+        _G[itemTooltip.name .. "TextLeft1"] = nativeFont
+        FW:DecorateTooltip(itemTooltip, {hyperlink=full.link})
+        equal(#itemTooltip.lines, 1, data.label .. " tooltip adds no score, Base row, spacer or warning")
+        equal(nativeFont.text, "Native item line", data.label .. " native tooltip receives no stat debug mark")
+        _G[itemTooltip.name .. "TextLeft1"] = nil
+    end
+end
+FW.DB.options.showComparisons, FW.DB.options.debugUnknownStats = true, false
+
+-- Accessories and existing character clothing slots are still gear. A known
+-- equipment slot also remains sufficient on legacy tuples without class IDs.
+for index, data in ipairs({
+    {label="ring", equipLoc="INVTYPE_FINGER"},
+    {label="offhand", equipLoc="INVTYPE_HOLDABLE"},
+    {label="shirt", equipLoc="INVTYPE_BODY"},
+    {label="tabard", equipLoc="INVTYPE_TABARD"},
+}) do
+    local garment = fixture("item:" .. (4100+index) .. ":0", 4, 0, 7, data.equipLoc)
+    equal(FW:GetScore(garment.link, main), 7, data.label .. " remains eligible gear")
+end
+local legacyGear = fixture("item:4110:0", nil, nil, 9, "INVTYPE_HEAD", nil, false)
+equal(FW:GetScore(legacyGear.link, main), 9, "known gear slot works without optional class metadata")
+
+-- Missing or secret equipment metadata waits; completing it restores scoring
+-- without changing the profile or preserving an excluded/loading decision.
+local pendingGear = fixture("item:4120:0", 4, 4, 25)
+pendingGear.equipLoc = nil
+local beforePending = scoreCalls
+local waitingScore, waitingReason = FW:GetScore(pendingGear.link, main)
+equal(waitingScore, nil); contains(waitingReason, "equipment data")
+equal(scoreCalls, beforePending)
+equal(FW.DB.cache.scores[pendingGear.key], nil, "missing equipment metadata does not cache a total")
+local secretEquipLoc = setmetatable({}, {__tostring=function() error("secret equipment must not be stringified") end})
+issecretvalue = function(value) return value == secretEquipLoc end
+pendingGear.equipLoc = secretEquipLoc
+waitingScore, waitingReason = FW:GetScore(pendingGear.link, main, true)
+equal(waitingScore, nil); contains(waitingReason, "equipment data")
+equal(scoreCalls, beforePending, "baseline bypass also waits for secret equipment metadata")
+issecretvalue = nil
+pendingGear.equipLoc = "INVTYPE_HEAD"
+equal(FW:GetScore(pendingGear.link, main), 25, "later equipment metadata recovers at the same profile revision")
+
+-- Debug-only tooltips must also leave non-gear alone when no profile is active.
+for _, profile in ipairs(FW:GetProfiles()) do assert(FW:UpdateProfile(profile.id, {active=false})) end
+FW.DB.options.debugUnknownStats = true
+local debugItem = records["item:4001:42:0"]
+local debugTooltip = tooltip(debugItem.link)
+FW:DecorateTooltip(debugTooltip, {hyperlink=debugItem.link})
+equal(#debugTooltip.lines, 1, "debug-only non-gear tooltip stays native")
 print("Item filters tests passed: " .. passed .. " checks")

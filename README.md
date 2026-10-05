@@ -1,4 +1,4 @@
-# ZwykValues 0.1.9
+# ZwykValues 0.1.10
 
 A standalone stat-weight addon written from scratch for WoW Forever. No Pawn code, Pawn dependency, third-party libraries, or online item database is required.
 
@@ -67,6 +67,8 @@ Separate healing/damage effects and compound static enchant lines (for example, 
 English and French static tooltip text are supported, with localized Blizzard formats used where available. Other locales can still expose API stats, but unrecognized tooltip-only values need further validation.
 
 ## Tooltip comparisons
+
+Only character gear is scored: weapons, armor, jewelry, shields/offhands, relics, shirts and tabards. Consumables, quest items, crafting materials, bags/quivers, ammunition, profession equipment and other non-gear items show no full/Base values, comparisons, upgrade arrows or stat-debug markers. This applies to every profile, including old cached totals. Gear still follows the profile's item filters.
 
 Every active profile adds one row with its name and score in the profile color. Candidate items show the signed point difference and percentage difference inline, with only the comparison fragment colored green for an increase, red for a decrease, or gray for equality:
 

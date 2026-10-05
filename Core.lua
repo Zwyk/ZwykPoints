@@ -6,6 +6,26 @@ local secondaryKeys = { hit = true, crit = true, haste = true, expertise = true,
 FW.SecondaryStatKeys = secondaryKeys
 local upgradeOptions = { upgradeBags = true, upgradeRolls = true, upgradeChat = true }
 local defaultColor = { r = 0.35, g = 0.8, b = 1 }
+-- Character gear only; storage, ammunition and profession slots are excluded.
+local gearEquipLocations = {
+    INVTYPE_HEAD=true, INVTYPE_NECK=true, INVTYPE_SHOULDER=true, INVTYPE_BODY=true,
+    INVTYPE_CHEST=true, INVTYPE_ROBE=true, INVTYPE_WAIST=true, INVTYPE_LEGS=true,
+    INVTYPE_FEET=true, INVTYPE_WRIST=true, INVTYPE_HAND=true, INVTYPE_FINGER=true,
+    INVTYPE_TRINKET=true, INVTYPE_CLOAK=true, INVTYPE_WEAPON=true,
+    INVTYPE_WEAPONMAINHAND=true, INVTYPE_WEAPONOFFHAND=true, INVTYPE_2HWEAPON=true,
+    INVTYPE_SHIELD=true, INVTYPE_HOLDABLE=true, INVTYPE_RANGED=true,
+    INVTYPE_RANGEDRIGHT=true, INVTYPE_THROWN=true, INVTYPE_RELIC=true, INVTYPE_TABARD=true,
+}
+
+function FW:IsGearItem(record)
+    if not record then return nil, "Item equipment data is not available yet." end
+    if record.classID ~= nil and record.classID ~= 2 and record.classID ~= 4 then return false end
+    local equipLoc = record.equipLoc
+    if (issecretvalue and issecretvalue(equipLoc)) or type(equipLoc) ~= "string" then
+        return nil, "Item equipment data is not available yet."
+    end
+    return gearEquipLocations[equipLoc] == true
+end
 
 -- Stable client subclass IDs keep saved filters independent of locale.
 FW.ItemFilterGroups = {
@@ -631,6 +651,13 @@ function FW:GetScore(link, profile, ignoreFilters)
     local record, errorMessage = self:GetItem(link)
     if not record then return nil, errorMessage or "Item data is not available yet." end
     if type(record.key) ~= "string" or type(record.stats) ~= "table" then return nil, "Item data is incomplete." end
+    local gear, gearError = self:IsGearItem(record)
+    if gear == nil and self.RefreshItemFilterMetadata then
+        self:RefreshItemFilterMetadata(record)
+        gear, gearError = self:IsGearItem(record)
+    end
+    if gear == false then return nil, record, "excluded" end
+    if gear == nil then return nil, gearError end
     if not ignoreFilters then
         local allowed, reason = self:IsItemAllowed(record, profile)
         if allowed == nil and self.RefreshItemFilterMetadata then

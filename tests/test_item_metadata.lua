@@ -13,14 +13,19 @@ local function newReader(item, locale)
     ITEM_RACES_ALLOWED = "Races: %s"
     LOCALIZED_CLASS_NAMES_MALE = { WARRIOR = "Warrior", PALADIN = "Paladin", MAGE = "Mage", PRIEST = "Priest" }
     LOCALIZED_CLASS_NAMES_FEMALE = { WARRIOR = "Warrior", PALADIN = "Paladin", MAGE = "Mage", PRIEST = "Priest" }
+    local function equipLoc(instant)
+        if instant and current.instantEquipLoc ~= nil then return current.instantEquipLoc end
+        if current.missingEquipLoc then return nil end
+        return current.equipLoc or "INVTYPE_HEAD"
+    end
     GetItemInfo = function(link)
         if current.loading then return nil end
-        if current.oldInfo then return "Test Item", link, 2, 18, 60, "Armor", "Plate", 1, current.equipLoc or "INVTYPE_HEAD" end
+        if current.oldInfo then return "Test Item", link, 2, 18, 60, "Armor", "Plate", 1, equipLoc() end
         return "Test Item", link, 2, 18, 60, "Armor", "Plate", 1,
-            current.equipLoc or "INVTYPE_HEAD", 12345, 100, current.classID, current.subclassID
+            equipLoc(), 12345, 100, current.classID, current.subclassID
     end
     local function instant()
-        return 100, "Weapon", "Sword", current.equipLoc or "INVTYPE_HEAD", 12345,
+        return 100, "Weapon", "Sword", equipLoc(true), 12345,
             current.instantClassID, current.instantSubclassID
     end
     GetItemInfoInstant = current.legacyInstant and function()
@@ -31,6 +36,7 @@ local function newReader(item, locale)
         IsItemDataCachedByID = function() return not current.loading end,
         GetItemStats = function()
             statsCalls = statsCalls + 1
+            if current.raw then return current.raw end
             return { ITEM_MOD_STRENGTH_SHORT = 5 }
         end,
         GetItemInfoInstant = current.modernInstant and function()
@@ -107,6 +113,30 @@ FW:RefreshItemFilterMetadata(item)
 equal(item.subclassID, 4)
 equal(statsCalls, 1); equal(tooltipCalls, 1, "category refresh reuses complete restriction metadata")
 equal(item.diagnostic.classID, 4); equal(item.diagnostic.subclassID, 4)
+
+FW = newReader({classID=2,subclassID=2,missingEquipLoc=true,raw={ITEM_MOD_DAMAGE_PER_SECOND_SHORT=5},
+    lines={"Test Item","10 - 20 Damage","Speed 3.00"}})
+local profile = assert(FW:CreateProfile("Gear metadata", {rangedDps=1}))
+local score, reason = FW:GetScore("item:117", profile)
+equal(score, nil); assert(reason:find("equipment data",1,true))
+equal(FW.DB.cache.items[FW:ItemKey("item:117")], nil, "missing slot data cannot cache stats in the wrong weapon group")
+equal(FW.DB.cache.scores[FW:ItemKey("item:117")], nil, "missing slot data cannot create a score")
+current.missingEquipLoc = false
+current.equipLoc = "INVTYPE_RANGED"
+equal(FW:GetScore("item:117", profile), 5, "later slot data scores ranged DPS in the correct group")
+item = assert(FW:GetItem("item:117"))
+equal(item.equipLoc, "INVTYPE_RANGED"); equal(item.diagnostic.equipLoc, "INVTYPE_RANGED")
+equal(item.stats.dps, nil); equal(item.stats.rangedDps, 5)
+equal(statsCalls, 2, "pending data is reread once the slot becomes known")
+item.equipLoc = nil -- A previously parsed record can still need metadata recovery.
+FW:RefreshItemFilterMetadata(item)
+equal(item.equipLoc, "INVTYPE_RANGED"); equal(item.diagnostic.equipLoc, "INVTYPE_RANGED")
+equal(statsCalls, 2, "metadata recovery reuses parsed stats")
+
+FW = newReader({classID=4,subclassID=4,missingEquipLoc=true,modernInstant=true,instantEquipLoc="INVTYPE_FINGER"})
+item = assert(FW:GetItem("item:118"))
+equal(item.equipLoc, "INVTYPE_FINGER", "instant metadata can complete a missing equipment slot")
+equal(modernInstantCalls, 1, "slot fallback works even when both category IDs are already known")
 
 FW = newReader({ classID = 4, subclassID = 4, lines = {
     "Test Item", "+5 Strength", "Classes: |cffc79c6eWarrior|r, Paladin",
@@ -217,6 +247,10 @@ current.details[3].leftText = "Classes: Paladin"
 FW:RefreshItemFilterMetadata(item)
 equal(item.classRestrictionsKnown, true); equal(item.allowedClasses.PALADIN, true)
 equal(item.diagnostic.tooltipReadable, true); equal(statsCalls, 1)
+item.equipLoc = secret
+FW:RefreshItemFilterMetadata(item)
+equal(item.equipLoc, "INVTYPE_HEAD", "unreadable cached slot data recovers from readable native metadata")
+equal(item.diagnostic.equipLoc, "INVTYPE_HEAD"); equal(statsCalls, 1)
 issecretvalue = nil
 
 current.details[3].leftText = "Retrieving item information"

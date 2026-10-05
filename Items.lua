@@ -199,19 +199,25 @@ end
 
 local function itemClassification(link, info)
     local classID, subclassID = info and identifier(info[13]), info and identifier(info[14])
+    local function equipmentType(value)
+        if issecretvalue and issecretvalue(value) then return nil end
+        return type(value) == "string" and value or nil
+    end
+    local equipLoc = info and equipmentType(info[10])
     local modern = C_Item and C_Item.GetItemInfoInstant
     local previous
     for _, getter in ipairs({ modern or false, GetItemInfoInstant or false }) do
-        if classID ~= nil and subclassID ~= nil then break end
+        if classID ~= nil and subclassID ~= nil and equipLoc ~= nil then break end
         if getter and getter ~= previous then
             previous = getter
             local instant = { pcall(getter, link) }
             if instant[1] then
                 classID, subclassID = classID or identifier(instant[7]), subclassID or identifier(instant[8])
+                equipLoc = equipLoc or equipmentType(instant[5])
             end
         end
     end
-    return classID, subclassID
+    return classID, subclassID, equipLoc
 end
 
 local restrictionFormats
@@ -353,8 +359,8 @@ function FW:GetRawItemStats(link)
             info = { pcall(GetItemInfo, link) }
         end
         if info[1] and info[2] then
-            result.name, result.link, result.equipLoc = info[2], info[3] or link, info[10] or ""
-            result.classID, result.subclassID = itemClassification(link, info)
+            result.name, result.link = info[2], info[3] or link
+            result.classID, result.subclassID, result.equipLoc = itemClassification(link, info)
         end
     end
     if not result.name then requestItem(itemID); return result end
@@ -399,16 +405,20 @@ end
 function FW:RefreshItemFilterMetadata(record)
     if type(record) ~= "table" or type(record.link) ~= "string" then return end
     local diagnostic = record.diagnostic or {}
-    if record.classID == nil or record.subclassID == nil then
+    local knownEquipLoc = record.equipLoc
+    if (issecretvalue and issecretvalue(knownEquipLoc)) or type(knownEquipLoc) ~= "string" then knownEquipLoc = nil end
+    if record.classID == nil or record.subclassID == nil or knownEquipLoc == nil then
         local getter = C_Item and C_Item.GetItemInfo or GetItemInfo
         local info = getter and { pcall(getter, record.link) } or nil
         if (not info or not info[1] or not info[2]) and GetItemInfo and getter ~= GetItemInfo then
             info = { pcall(GetItemInfo, record.link) }
         end
         if info and not info[1] then info = nil end
-        local classID, subclassID = itemClassification(record.link, info)
+        local classID, subclassID, equipLoc = itemClassification(record.link, info)
         record.classID, record.subclassID = record.classID or classID, record.subclassID or subclassID
+        record.equipLoc = knownEquipLoc or equipLoc
         diagnostic.classID, diagnostic.subclassID = record.classID, record.subclassID
+        diagnostic.equipLoc = record.equipLoc
     end
     if record.classRestrictionsKnown ~= true then
         restrictionFormats = nil -- Native locale/class globals may have loaded since the first read.
@@ -772,13 +782,16 @@ function FW:GetItem(link)
     if not diagnostic then return nil, err end
     if not diagnostic.ready then return nil, "Item data is still loading." end
     local record = { key = key, link = diagnostic.link or link, itemID = diagnostic.itemID,
-        equipLoc = diagnostic.equipLoc or "", stats = {}, percentStats = {}, ratingStats = {},
+        equipLoc = diagnostic.equipLoc, stats = {}, percentStats = {}, ratingStats = {},
         classID = diagnostic.classID, subclassID = diagnostic.subclassID,
         allowedClasses = diagnostic.allowedClasses, classRestrictionsKnown = diagnostic.classRestrictionsKnown,
         classRestrictionUnknownNames = diagnostic.classRestrictionUnknownNames,
         unresolvedStats = {}, unrecognizedLines = {}, warnings = {}, partial = false,
         name = diagnostic.name, parserVersion = PARSER_VERSION,
         diagnostic = self.CopyItemDiagnostic and self:CopyItemDiagnostic(diagnostic) or diagnostic }
+    local gear, gearError = self:IsGearItem(record)
+    if gear == false then return record end
+    if gear == nil then return nil, gearError end
     for rawKey, rawValue in pairs(diagnostic.raw) do
         if issecretvalue and issecretvalue(rawKey) then rawKey = nil end
         local value = number(rawValue)
