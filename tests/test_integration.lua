@@ -7,6 +7,10 @@ local itemDB={
     ["item:100:0:0:0:0:0:-7:123:60"]={name="Variant helmet",strength=15,crit=1,equipLoc="INVTYPE_HEAD"},
     ["item:102:0:0:0:0:0:0:0:60"]={name="Scanner helmet",strength=4,crit=1,equipLoc="INVTYPE_HEAD"},
     ["item:103:0:0:0:0:0:0:0:60"]={name="Partial helmet",strength=12,crit=1,equipLoc="INVTYPE_HEAD",unknown=3},
+    ["item:104:8481:0:0:0:0:0:0:60"]={name="Enchanted new helmet",strength=10,crit=1,equipLoc="INVTYPE_HEAD",enchant=5},
+    ["item:104:0:0:0:0:0:0:0:60"]={name="Base new helmet",strength=10,crit=1,equipLoc="INVTYPE_HEAD"},
+    ["item:105:8481:0:0:0:0:0:0:60"]={name="Enchanted old helmet",strength=8,crit=1,equipLoc="INVTYPE_HEAD",enchant=10},
+    ["item:105:0:0:0:0:0:0:0:60"]={name="Base old helmet",strength=8,crit=1,equipLoc="INVTYPE_HEAD"},
 }
 local candidate="item:100:0:0:0:0:0:0:0:60"
 local baseline="item:101:0:0:0:0:0:0:0:60"
@@ -20,6 +24,7 @@ local function sourceLines(link)
     local lines = {item.name,"+" .. item.strength .. " Strength",
         "Equip: Increases your chance to get a critical strike by " .. item.crit .. "%."}
     if item.unknown then lines[#lines+1]="+" .. item.unknown .. " Mystic Focus" end
+    if item.enchant then lines[#lines+1]="Enchanted: Strength +" .. item.enchant end
     return lines
 end
 GetBuildInfo=function() return "16.0.0","65000","Oct 1 2026",160000 end
@@ -109,6 +114,15 @@ local function findLine(text)
 end
 assert(findLine("Melee").right=="30.00  |cff40ff59|TInterface\\AddOns\\ZwykValues\\Textures\\ArrowUp:12:12:0:0|t+4.00 (+15.4%)|r")
 assert(findLine("Caster").right=="5.00  |cffb2b2b2=0.00 (+0.0%)|r")
+assert(findLine("  Base").right=="30.00  |cff40ff59|TInterface\\AddOns\\ZwykValues\\Textures\\ArrowUp:10:10:0:0|t+4.00 (+15.4%)|r")
+local baseRows=0
+for index,line in ipairs(GameTooltip.lines) do
+    if line.left=="  Base" then
+        baseRows=baseRows+1
+        assert(GameTooltip.lines[index-1].left==(baseRows==1 and "Melee" or "Caster"))
+    end
+end
+assert(baseRows==2, "Every profile should have its own base subline")
 assert(not findLine("ZwykValues"), "Tooltip should not add an addon header")
 local lineCount=#GameTooltip.lines
 GameTooltip:Fire("OnTooltipSetItem")
@@ -146,6 +160,15 @@ baseline=partial
 GameTooltip:SetHyperlink(candidate)
 assert(findLine("Melee").right=="40.00  |cffff5959|TInterface\\AddOns\\ZwykValues\\Textures\\ArrowDown:12:12:0:0|t-6.00 (-13.0%)|r")
 assert(findLine("Partial stat data; /zv inspect or /zv exportissues."))
+baseline=oldBaseline
+
+-- The full pipeline can report a downgrade with enchants and an upgrade on
+-- the base subline, stripping the equipped enchant as well as the candidate.
+baseline="item:105:8481:0:0:0:0:0:0:60"
+GameTooltip:SetHyperlink("item:104:8481:0:0:0:0:0:0:60")
+assert(findLine("Melee").right=="55.00  |cffff5959|TInterface\\AddOns\\ZwykValues\\Textures\\ArrowDown:12:12:0:0|t-9.00 (-14.1%)|r")
+assert(findLine("  Base").right=="40.00  |cff40ff59|TInterface\\AddOns\\ZwykValues\\Textures\\ArrowUp:10:10:0:0|t+6.00 (+17.6%)|r")
+assert(not findLine("Partial stat data; /zv inspect or /zv exportissues."))
 baseline=oldBaseline
 
 -- The actual legacy scanner must be excluded before SetHyperlink invokes hooks.

@@ -38,14 +38,17 @@ end
 
 -- Rings/trinkets are separate replacements. A two-handed weapon replaces the
 -- combined main/off-hand score; a shield cannot be compared to an occupied 2H slot.
-function FW:CompareItem(link, profile)
-    local score, record = self:GetScore(link, profile)
+function FW:CompareItem(link, profile, baseOnly)
+    local getScore = baseOnly and self.GetBaseScore or self.GetScore
+    local score, record = getScore(self, link, profile)
     if score == nil then return nil, record end
     local result = {score=score, record=record, comparisons={}}
     result.hasIssues = (self.ItemHasIssues and self:ItemHasIssues(record, profile)) or record.partial
     local equipLoc = record.equipLoc
     local mainLink = inventoryLink(16)
-    local mainType = inventoryType(mainLink)
+    local mainTypeLink = mainLink
+    if baseOnly then mainTypeLink = self:GetBaseItemLink(mainLink) end
+    local mainType = inventoryType(mainTypeLink)
     if mainLink and not mainType and (equipLoc == "INVTYPE_WEAPON" or
         equipLoc == "INVTYPE_WEAPONMAINHAND" or equipLoc == "INVTYPE_WEAPONOFFHAND" or
         equipLoc == "INVTYPE_SHIELD" or equipLoc == "INVTYPE_HOLDABLE") then
@@ -76,7 +79,7 @@ function FW:CompareItem(link, profile)
             local equipped = inventoryLink(slot)
             if equipped then
                 comparison.links[#comparison.links+1] = equipped
-                local equippedScore, equippedRecord = self:GetScore(equipped, profile)
+                local equippedScore, equippedRecord = getScore(self, equipped, profile)
                 if equippedScore == nil then comparison.error = tostring(equippedRecord); break end
                 if (self.ItemHasIssues and self:ItemHasIssues(equippedRecord, profile)) or equippedRecord.partial then
                     comparison.hasIssues, result.hasIssues = true, true
@@ -96,4 +99,8 @@ function FW:CompareItem(link, profile)
         end
     end
     return result
+end
+
+function FW:CompareBaseItem(link, profile)
+    return self:CompareItem(link, profile, true)
 end

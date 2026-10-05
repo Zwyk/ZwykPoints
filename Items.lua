@@ -35,6 +35,37 @@ local function itemPayload(link)
     return link:match("(item:[^|%s]+)")
 end
 
+function FW:GetBaseItemLink(link)
+    if issecretvalue and issecretvalue(link) then return nil end
+    local payload
+    if type(link) == "number" then
+        if link ~= link or link == math.huge or link <= 0 or link ~= math.floor(link) then return nil end
+        payload = "item:" .. math.floor(link)
+    elseif type(link) == "string" then
+        if link:match("^item:[^|%s]+$") then payload = link
+        else
+            local hyperlink = link:gsub("^|c%x%x%x%x%x%x%x%x", ""):gsub("|r$", "")
+            payload = hyperlink:match("^|H(item:[^|%s]+)|h.-|h$")
+        end
+    end
+    if not payload then return nil end
+    local itemID, tail = payload:match("^item:(%d+)(.*)$")
+    local id = tonumber(itemID)
+    if not id or id == math.huge or id <= 0 then return nil end
+    if tail == "" then return "item:" .. itemID .. ":0" end
+    local enchant, remaining = tail:match("^:([^:]*)(.*)$")
+    if not enchant or (enchant ~= "" and (not enchant:match("^%d+$") or tonumber(enchant) == math.huge))
+        or (remaining ~= "" and not remaining:match("^:[%w:%-]*$")) then return nil end
+    -- Keep suffixes, bonus IDs, creator GUIDs and trailing empty fields intact.
+    return "item:" .. itemID .. ":0" .. remaining
+end
+
+function FW:GetBaseScore(link, profile)
+    local baseLink = self:GetBaseItemLink(link)
+    if not baseLink then return nil, "Invalid item link." end
+    return self:GetScore(baseLink, profile)
+end
+
 function FW:ItemKey(link)
     local payload = itemPayload(link)
     if not payload or not tonumber(payload:match("^item:(%d+)")) then return nil end

@@ -97,14 +97,48 @@ end
 -- packaged textures so profile fonts cannot turn the indicators into boxes.
 local upArrow = "|TInterface\\AddOns\\ZwykValues\\Textures\\ArrowUp:12:12:0:0|t"
 local downArrow = "|TInterface\\AddOns\\ZwykValues\\Textures\\ArrowDown:12:12:0:0|t"
-local function comparisonText(item)
+local function comparisonText(item, small)
     if item.error then return "|cffb2b2b2? comparison unavailable|r" end
     local equal = item.status == "equal"
     local arrow = equal and "=" or (item.status == "upgrade" and upArrow or downArrow)
+    if small and not equal then arrow = arrow:gsub(":12:12:", ":10:10:") end
     local color = equal and "b2b2b2" or (item.status == "upgrade" and "40ff59" or "ff5959")
     local delta = equal and "0.00" or formatNumber(item.delta, true)
     local percent = equal and "+0.0%" or (item.percent and string.format("%+.1f%%", item.percent))
     return "|cff" .. color .. arrow .. delta .. " (" .. (percent or "n/a") .. ")|r"
+end
+local function restoreBaseFonts(tooltip)
+    for fontString, font in pairs(tooltip.fwBaseFonts or {}) do
+        fontString:SetFont(font[1], font[2], font[3])
+    end
+    tooltip.fwBaseFonts = nil
+end
+local function shrinkBaseLine(tooltip)
+    local name = tooltip.GetName and tooltip:GetName()
+    local index = tooltip.NumLines and tooltip:NumLines()
+    if not index then return end
+    for _, side in ipairs({"Left", "Right"}) do
+        local key = "Text" .. side .. index
+        local getter = tooltip["Get" .. side .. "Line"]
+        local fontString
+        if getter then
+            local ok, line = pcall(getter, tooltip, index)
+            if ok then fontString = line end
+        end
+        fontString = fontString or tooltip[key] or (name and _G[name .. key])
+        if fontString and fontString.GetFont and fontString.SetFont then
+            tooltip.fwBaseFonts = tooltip.fwBaseFonts or {}
+            local font = tooltip.fwBaseFonts[fontString]
+            if not font then
+                local path, size, flags = fontString:GetFont()
+                if path and type(size) == "number" then
+                    font = {path, size, flags}
+                    tooltip.fwBaseFonts[fontString] = font
+                end
+            end
+            if font then fontString:SetFont(font[1], font[2] * .85, font[3]) end
+        end
+    end
 end
 local function hasIssues(record, profile)
     return record and ((FW.ItemHasIssues and FW:ItemHasIssues(record, profile)) or record.partial)
@@ -157,28 +191,41 @@ function FW:DecorateTooltip(tooltip, data)
     end
     for _, profile in ipairs(profiles) do
         local r, g, b = profile.color.r, profile.color.g, profile.color.b
-        local result, errorMessage
-        if compare then
-            result, errorMessage = self:CompareItem(link, profile)
-        else
-            local score, record = self:GetScore(link, profile)
-            if score ~= nil then result = {score=score, record=record, comparisons={}}
-            else errorMessage = record end
-        end
-        if result then
-            local comparisons = {}
-            for _, item in ipairs(result.comparisons) do
-                comparisons[#comparisons+1] = comparisonText(item)
-                if item.error then notes[item.error] = true end
-                issues = issues or item.hasIssues
+        local function readResult(base)
+            if compare then
+                if base then return self:CompareBaseItem(link, profile) end
+                return self:CompareItem(link, profile)
             end
-            local values = formatNumber(result.score)
-            if #comparisons > 0 then values = values .. "  " .. table.concat(comparisons, " | ") end
-            tooltip:AddDoubleLine(profile.name, values, r,g,b, r,g,b)
-            if result.note then notes[result.note] = true end
-            issues = issues or result.hasIssues or hasIssues(result.record, profile)
-        else
-            tooltip:AddLine(profile.name .. ": " .. tostring(errorMessage or "Item data loading"), r,g,b, true)
+            local score, record
+            if base then score, record = self:GetBaseScore(link, profile)
+            else score, record = self:GetScore(link, profile) end
+            if score ~= nil then return {score=score, record=record, comparisons={}} end
+            return nil, record
+        end
+        local function addResult(result, errorMessage, base)
+            local label = base and "  Base" or profile.name
+            if result then
+                local comparisons = {}
+                for _, item in ipairs(result.comparisons) do
+                    comparisons[#comparisons+1] = comparisonText(item, base)
+                    if item.error then notes[item.error] = true end
+                    issues = issues or item.hasIssues
+                end
+                local values = formatNumber(result.score)
+                if #comparisons > 0 then values = values .. "  " .. table.concat(comparisons, " | ") end
+                tooltip:AddDoubleLine(label, values, r,g,b, r,g,b)
+                if result.note then notes[result.note] = true end
+                issues = issues or result.hasIssues or hasIssues(result.record, profile)
+            else
+                tooltip:AddLine(label .. ": " .. tostring(errorMessage or "Item data loading"), r,g,b, true)
+            end
+            if base then shrinkBaseLine(tooltip) end
+        end
+        local result, errorMessage = readResult(false)
+        addResult(result, errorMessage, false)
+        if self.GetBaseScore and self.CompareBaseItem then
+            result, errorMessage = readResult(true)
+            addResult(result, errorMessage, true)
         end
     end
     for note in pairs(notes) do tooltip:AddLine("  " .. note, .75,.75,.75, true) end
@@ -221,6 +268,7 @@ function FW:InstallTooltipHooks()
     local modern = TooltipDataProcessor and Enum and Enum.TooltipDataType and
         TooltipDataProcessor.AddTooltipPostCall
     local function clear(tooltip)
+        restoreBaseFonts(tooltip)
         tooltip.fwSignature = nil
         tooltip.fwSourceLink = nil
         watched[tooltip] = nil

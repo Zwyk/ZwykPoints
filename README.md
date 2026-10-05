@@ -1,4 +1,4 @@
-# ZwykValues 0.1.5
+# ZwykValues 0.1.6
 
 A standalone stat-weight addon written from scratch for WoW Forever. No Pawn code, Pawn dependency, third-party libraries, or online item database is required.
 
@@ -65,6 +65,8 @@ English and French static tooltip text are supported, with localized Blizzard fo
 Every active profile adds one row with its name and score in the profile color. Candidate items show the signed point difference and percentage difference inline, with only the comparison fragment colored green for an increase, red for a decrease, or gray for equality:
 
 `Mageladin    2.56  ↑+1.52 (+146.2%)`
+
+A smaller, indented **Base** subline appears beneath each profile. It scores the same item without its enchant and compares it against the equipped items with their enchants removed too. The client supplies the unenchanted stats directly; the addon does not subtract guessed enchant bonuses. Intrinsic item variants, including random-suffix stats, remain part of the base value. Equipped and shopping tooltips show the base score alone. The full score above still includes recognized enchants.
 
 The up/down indicators use packaged arrow textures so they display even when the tooltip font has no Unicode arrow glyphs. Equality uses `=`. Two spaces separate the score from the first comparison. Multiple replacement choices share the same row, in equipped slot order:
 
@@ -135,6 +137,7 @@ Run the included tests from the addon directory with a Lua interpreter, for exam
 lua tests/test_core.lua
 lua tests/test_items.lua
 lua tests/test_compare.lua
+lua tests/test_base.lua
 lua tests/test_tooltips.lua
 lua tests/test_bootstrap.lua
 lua tests/test_integration.lua

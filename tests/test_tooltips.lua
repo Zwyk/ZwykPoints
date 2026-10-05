@@ -41,17 +41,22 @@ function FW:CompareItem()
 end
 
 local function tooltip(name, link)
-    local frame = {name=name,link=link,lines={},scripts={},shown=true}
+    local frame = {name=name,link=link,lines={},scripts={},shown=true,fontStrings={}}
     local function registerLines(self,index)
-        if not self.name then return end
-        _G[self.name .. "TextLeft" .. index]={
-            GetText=function() return self.lines[index] and self.lines[index].text end,
-            SetText=function(_,text) self.lines[index].text=text end,
-        }
-        _G[self.name .. "TextRight" .. index]={
-            GetText=function() return self.lines[index] and self.lines[index].right end,
-            SetText=function(_,text) self.lines[index].right=text end,
-        }
+        for _, side in ipairs({"Left", "Right"}) do
+            local key = side .. index
+            local field = side == "Left" and "text" or "right"
+            if not self.fontStrings[key] then
+                self.fontStrings[key]={
+                    path="Tooltip.ttf",size=12,flags="OUTLINE",
+                    GetText=function() return self.lines[index] and self.lines[index][field] end,
+                    SetText=function(_,text) self.lines[index][field]=text end,
+                    GetFont=function(font) return font.path,font.size,font.flags end,
+                    SetFont=function(font,path,size,flags) font.path=path; font.size=size; font.flags=flags end,
+                }
+            end
+            if self.name then _G[self.name .. "Text" .. key]=self.fontStrings[key] end
+        end
     end
     function frame:AddLine(text,r,g,b)
         self.lines[#self.lines+1]={text=text,r=r,g=g,b=b}
@@ -62,6 +67,8 @@ local function tooltip(name, link)
         registerLines(self,#self.lines)
     end
     function frame:NumLines() return #self.lines end
+    function frame:GetLeftLine(index) return self.fontStrings["Left" .. index] end
+    function frame:GetRightLine(index) return self.fontStrings["Right" .. index] end
     function frame:GetItem() return "Item",self.link end
     function frame:GetName() return self.name end
     function frame:IsShown() return self.shown end
@@ -342,4 +349,77 @@ local legacy=tooltip("ShoppingTooltipLegacy",nil)
 function legacy:SetCompareItem() self:Clear(); self.link=variant; self:AddLine("Equipped") end
 FW.HookTooltip(legacy); legacy:SetCompareItem()
 assert(#legacy.lines==4 and legacy.lines[3].right=="100.00" and calls.scoreLink==variant)
+
+-- Each profile has a smaller base subline. It uses its own score/comparisons,
+-- while native shopping/equipped tooltips and disabled comparisons show scores.
+local baseCalls={score=0,compare=0}
+function FW:GetBaseScore(link,profile)
+    baseCalls.score=baseCalls.score+1; baseCalls.link=link
+    return profile.id=="one" and 80 or 70,record
+end
+function FW:CompareBaseItem(link,profile)
+    baseCalls.compare=baseCalls.compare+1; baseCalls.link=link
+    return {score=profile.id=="one" and 80 or 70,record=record,comparisons={
+        {delta=-5,percent=-5.882,status="downgrade",baseline=85},
+        {delta=0,percent=0,status="equal",baseline=80},
+    }}
+end
+local baseTip=tooltip("BaseTooltip",variant)
+postCall(baseTip,{hyperlink=variant})
+assert(#baseTip.lines==5 and baseCalls.compare==2 and baseCalls.link==variant)
+assert(baseTip.lines[2].text=="Melee" and baseTip.lines[4].text=="Caster")
+assert(baseTip.lines[3].text=="  Base" and baseTip.lines[5].text=="  Base")
+assert(baseTip.lines[3].right==
+    "80.00  |cffff5959|TInterface\\AddOns\\ZwykValues\\Textures\\ArrowDown:10:10:0:0|t-5.00 (-5.9%)|r | |cffb2b2b2=0.00 (+0.0%)|r")
+assert(baseTip.lines[5].right:find("70.00",1,true) and baseTip.lines[5].b==.9)
+assert(BaseTooltipTextLeft2.size==12 and BaseTooltipTextRight2.size==12)
+assert(math.abs(BaseTooltipTextLeft3.size-10.2)<1e-9 and BaseTooltipTextRight3.flags=="OUTLINE")
+postCall(baseTip,{hyperlink=variant})
+assert(#baseTip.lines==5 and baseCalls.compare==2)
+baseTip:Clear()
+assert(BaseTooltipTextLeft3.size==12 and BaseTooltipTextRight3.size==12 and baseTip.fwBaseFonts==nil)
+postCall(baseTip,{hyperlink=variant})
+assert(math.abs(BaseTooltipTextLeft3.size-10.2)<1e-9) -- no cumulative shrinking
+baseTip:Hide()
+assert(BaseTooltipTextLeft3.size==12 and BaseTooltipTextRight5.size==12)
+local anonymousBase=tooltip(nil,variant)
+postCall(anonymousBase,{hyperlink=variant})
+assert(math.abs(anonymousBase:GetLeftLine(3).size-10.2)<1e-9)
+assert(math.abs(anonymousBase:GetRightLine(3).size-10.2)<1e-9)
+anonymousBase:Clear()
+assert(anonymousBase:GetLeftLine(3).size==12 and anonymousBase:GetRightLine(3).size==12)
+local legacyBase=tooltip("LegacyBase",variant)
+legacyBase.GetLeftLine=nil; legacyBase.GetRightLine=nil
+postCall(legacyBase,{hyperlink=variant})
+assert(math.abs(LegacyBaseTextLeft3.size-10.2)<1e-9 and math.abs(LegacyBaseTextRight3.size-10.2)<1e-9)
+legacyBase:Hide()
+assert(LegacyBaseTextLeft3.size==12 and LegacyBaseTextRight3.size==12)
+baseTip:Clear(); baseTip.equipped=true
+postCall(baseTip,{hyperlink=variant})
+assert(baseTip.lines[3].right=="80.00" and baseCalls.score==2)
+local baseShopping=tooltip("ShoppingTooltipBase",variant)
+postCall(baseShopping,{hyperlink=variant})
+assert(baseShopping.lines[3].right=="80.00" and baseCalls.score==4)
+FW.DB.options.showComparisons=false
+local baseNoCompare=tooltip("BaseNoCompare",variant)
+postCall(baseNoCompare,{hyperlink=variant})
+assert(baseNoCompare.lines[3].right=="80.00" and baseCalls.score==6)
+FW.DB.options.showComparisons=true
+
+-- A pending base read retains the full score, and base/full issue warnings
+-- deduplicate. Unknown enchant text on the full item can coexist with clean base.
+FW.CompareBaseItem=function() return nil,"Item data loading" end
+local baseLoading=tooltip("BaseLoading",variant)
+postCall(baseLoading,{hyperlink=variant})
+assert(baseLoading.lines[2].right:find("100.00",1,true))
+assert(baseLoading.lines[3].text=="  Base: Item data loading" and math.abs(BaseLoadingTextLeft3.size-10.2)<1e-9)
+FW.CompareBaseItem=function()
+    return {score=80,record={stats={}},comparisons={}}
+end
+record.partial=true
+local basePartial=tooltip("BasePartial",variant)
+postCall(basePartial,{hyperlink=variant})
+assert(#basePartial.lines==6 and basePartial.lines[3].right=="80.00")
+assert(basePartial.lines[6].text:find("exportissues",1,true))
+record.partial=false
 print("Tooltip tests passed")
