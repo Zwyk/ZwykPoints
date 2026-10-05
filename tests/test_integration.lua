@@ -130,15 +130,7 @@ local function findLine(text)
 end
 assert(findLine("Melee").right=="30.00  |cff40ff59|TInterface\\AddOns\\ZwykValues\\Textures\\ArrowUp:12:12:0:0|t+4.00 (+15.4%)|r")
 assert(findLine("Caster").right=="5.00  |cffb2b2b2=0.00 (+0.0%)|r")
-assert(findLine("  Base").right=="30.00  |cff40ff59|TInterface\\AddOns\\ZwykValues\\Textures\\ArrowUp:10:10:0:0|t+4.00 (+15.4%)|r")
-local baseRows=0
-for index,line in ipairs(GameTooltip.lines) do
-    if line.left=="  Base" then
-        baseRows=baseRows+1
-        assert(GameTooltip.lines[index-1].left==(baseRows==1 and "Melee" or "Caster"))
-    end
-end
-assert(baseRows==2, "Every profile should have its own base subline")
+assert(not findLine("  Base"), "unchanged full/Base values omit both duplicate profile sublines")
 assert(not findLine("ZwykValues"), "Tooltip should not add an addon header")
 local lineCount=#GameTooltip.lines
 GameTooltip:Fire("OnTooltipSetItem")
@@ -185,6 +177,14 @@ GameTooltip:SetHyperlink("|cnIQ2:|Hitem:104:8481:0:0:0:0:0:0:60|h[Enchanted new 
 assert(findLine("Melee").right=="55.00  |cffff5959|TInterface\\AddOns\\ZwykValues\\Textures\\ArrowDown:12:12:0:0|t-9.00 (-14.1%)|r")
 assert(findLine("  Base").right=="40.00  |cff40ff59|TInterface\\AddOns\\ZwykValues\\Textures\\ArrowUp:10:10:0:0|t+6.00 (+17.6%)|r")
 assert(not findLine("Partial stat data; /zv inspect or /zv exportissues."))
+-- Removing an equipped enchant changes the comparison even when the hovered
+-- item's own score is unchanged. Only the profile valuing that enchant differs.
+GameTooltip:SetHyperlink(candidate)
+assert(findLine("Melee").right:find("40.00",1,true))
+assert(findLine("  Base").right=="40.00  |cff40ff59|TInterface\\AddOns\\ZwykValues\\Textures\\ArrowUp:10:10:0:0|t+6.00 (+17.6%)|r")
+local relevantBaseRows=0
+for _,line in ipairs(GameTooltip.lines) do if line.left=="  Base" then relevantBaseRows=relevantBaseRows+1 end end
+assert(relevantBaseRows==1,"Base visibility is calculated independently for each profile")
 baseline=oldBaseline
 
 -- The actual legacy scanner must be excluded before SetHyperlink invokes hooks.
@@ -204,7 +204,7 @@ assert(FW:UpdateProfile(one.id,{itemFilters={armor={["1"]=false},includeOtherCla
 assert(FW:SetMainProfile(one.id))
 local cloth="item:106:0:0:0:0:0:0:0:60"
 GameTooltip:SetHyperlink(cloth)
-assert(not findLine("Melee") and findLine("Caster") and findLine("  Base").right:find("5.00",1,true))
+assert(not findLine("Melee") and findLine("Caster") and not findLine("  Base"))
 assert(not FW:IsMainProfileUpgrade(cloth))
 local warriorItem="item:107:0:0:0:0:0:0:0:60"
 GameTooltip:SetHyperlink(warriorItem)
@@ -256,11 +256,8 @@ GetInventoryItemLink=function(unit,slot)
 end
 GameTooltip:SetHyperlink(ammoLink)
 assert(findLine("Ammunition").right=="15.00  |cff40ff59|TInterface\\AddOns\\ZwykValues\\Textures\\ArrowUp:12:12:0:0|t+7.00 (+87.5%)|r")
-local ammoBaseRows=0
-for _, line in ipairs(GameTooltip.lines) do
-    if line.left=="  Base" and line.right:find("15.00",1,true) then ammoBaseRows=ammoBaseRows+1 end
-end
-assert(ammoBaseRows==1 and not findLine("Partial stat data; /zv inspect or /zv exportissues."))
+assert(not findLine("  Base") and not findLine("Partial stat data; /zv inspect or /zv exportissues."),
+    "unchanted ammo has no duplicate Base row")
 local ammoComparison=assert(FW:CompareBaseItem(ammoLink,ammoProfile))
 assert(#ammoComparison.comparisons==1 and ammoComparison.comparisons[1].slots[1]==0)
 assert(ammoComparison.comparisons[1].baseline==8 and ammoComparison.comparisons[1].label=="Ammunition")

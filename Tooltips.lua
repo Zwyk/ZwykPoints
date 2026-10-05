@@ -107,6 +107,20 @@ local function comparisonText(item, small)
     local percent = equal and "+0.0%" or (item.percent and string.format("%+.1f%%", item.percent))
     return "|cff" .. color .. arrow .. delta .. " (" .. (percent or "n/a") .. ")|r"
 end
+local function resultValues(result, small)
+    local values, comparisons = formatNumber(result.score), {}
+    for _, item in ipairs(result.comparisons or {}) do
+        comparisons[#comparisons+1] = comparisonText(item, small)
+    end
+    if #comparisons > 0 then values = values .. "  " .. table.concat(comparisons, " | ") end
+    return values
+end
+local function resultIdentity(result, errorMessage)
+    if not result then return "error:" .. tostring(errorMessage or "Item data loading") end
+    if result.excluded then return "excluded" end
+    -- Compare the displayed values with matching arrow sizes, not raw precision.
+    return "values:" .. resultValues(result, false)
+end
 local function restoreBaseFonts(tooltip)
     for fontString, font in pairs(tooltip.fwBaseFonts or {}) do
         fontString:SetFont(font[1], font[2], font[3])
@@ -203,33 +217,30 @@ function FW:DecorateTooltip(tooltip, data)
             if detail == "excluded" then return {excluded=true,record=record,comparisons={}} end
             return nil, record
         end
-        local function addResult(result, errorMessage, base)
+        local function addResult(result, errorMessage, base, hideRow)
             if result and result.excluded then return end
             if not addedSpacer then tooltip:AddLine(" "); addedSpacer = true end
             if not base then displayedProfiles = displayedProfiles + 1 end
             local label = base and "  Base" or profile.name
             if result then
-                local comparisons = {}
                 for _, item in ipairs(result.comparisons) do
-                    comparisons[#comparisons+1] = comparisonText(item, base)
                     if item.error then notes[item.error] = true end
                     issues = issues or item.hasIssues
                 end
-                local values = formatNumber(result.score)
-                if #comparisons > 0 then values = values .. "  " .. table.concat(comparisons, " | ") end
-                tooltip:AddDoubleLine(label, values, r,g,b, r,g,b)
+                if not hideRow then tooltip:AddDoubleLine(label, resultValues(result, base), r,g,b, r,g,b) end
                 if result.note then notes[result.note] = true end
                 issues = issues or result.hasIssues or hasIssues(result.record, profile)
-            else
+            elseif not hideRow then
                 tooltip:AddLine(label .. ": " .. tostring(errorMessage or "Item data loading"), r,g,b, true)
             end
-            if base then shrinkBaseLine(tooltip) end
+            if base and not hideRow then shrinkBaseLine(tooltip) end
         end
         local result, errorMessage = readResult(false)
         addResult(result, errorMessage, false)
         if not (result and result.excluded) and self.GetBaseScore and self.CompareBaseItem then
-            result, errorMessage = readResult(true)
-            addResult(result, errorMessage, true)
+            local baseResult, baseError = readResult(true)
+            local duplicate = resultIdentity(result, errorMessage) == resultIdentity(baseResult, baseError)
+            addResult(baseResult, baseError, true, duplicate)
         end
     end
     for note in pairs(notes) do tooltip:AddLine("  " .. note, .75,.75,.75, true) end

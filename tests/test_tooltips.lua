@@ -422,4 +422,179 @@ postCall(basePartial,{hyperlink=variant})
 assert(#basePartial.lines==6 and basePartial.lines[3].right=="80.00")
 assert(basePartial.lines[6].text:find("exportissues",1,true))
 record.partial=false
+
+-- Base is useful only when its displayed values differ. Identical upgrade
+-- comparisons use differently sized texture markup, but still express the
+-- same score and comparison and must not produce a second row.
+profiles={{id="one",name="Melee",revision=1,color={r=.8,g=.2,b=.1}}}
+local fullResult, baseResult, fullError, baseError
+local fullScore, baseScore, fullScoreError, baseScoreError=100,100
+local fullRecord, baseRecord={stats={}},{stats={}}
+local relevantCalls={full=0,base=0}
+FW.CompareItem=function()
+    relevantCalls.full=relevantCalls.full+1
+    return fullResult,fullError
+end
+FW.CompareBaseItem=function()
+    relevantCalls.base=relevantCalls.base+1
+    return baseResult,baseError
+end
+FW.GetScore=function() return fullScore,fullRecord,fullScoreError end
+FW.GetBaseScore=function() return baseScore,baseRecord,baseScoreError end
+local function compared(score,delta,percent)
+    return {score=score,record={stats={}},comparisons={
+        {delta=delta,percent=percent,status="upgrade",baseline=score-delta},
+    }}
+end
+local function hasBase(tip)
+    for _,line in ipairs(tip.lines) do
+        if line.text=="  Base" or line.text:find("  Base:",1,true) then return true end
+    end
+    return false
+end
+local function decorateRelevant(name,equipped)
+    local tip=tooltip(name,variant)
+    tip.equipped=equipped
+    postCall(tip,{hyperlink=variant})
+    return tip
+end
+fullResult=compared(100,10,11.111)
+baseResult=compared(100,10,11.111)
+local equalBase=decorateRelevant("EqualBaseValues")
+assert(#equalBase.lines==2 and not hasBase(equalBase), "equal full/base score and upgrade comparison must hide Base")
+assert(equalBase.lines[2].right:find("ArrowUp:12:12",1,true), "the full comparison keeps its normal arrow size")
+assert(EqualBaseValuesTextLeft2.size==12 and EqualBaseValuesTextRight2.size==12 and equalBase.fwBaseFonts==nil)
+
+fullResult={score=100,record={stats={}},comparisons={}}
+baseResult={score=80,record={stats={}},comparisons={}}
+local scoreDifference=decorateRelevant("BaseScoreDifference")
+assert(#scoreDifference.lines==3 and hasBase(scoreDifference) and scoreDifference.lines[3].right=="80.00", "a score-only difference keeps Base")
+
+-- A candidate may have no scored enchant, while an equipped item's enchant
+-- changes its replacement baseline. Base still conveys that comparison.
+fullResult=compared(100,10,11.111)
+baseResult=compared(100,20,25)
+local baselineDifference=decorateRelevant("BaseBaselineDifference")
+assert(#baselineDifference.lines==3 and hasBase(baselineDifference), "equal candidate scores with different equipped baselines keep Base")
+assert(baselineDifference.lines[2].right:find("100.00",1,true) and baselineDifference.lines[3].right:find("100.00",1,true))
+assert(baselineDifference.lines[3].right:find("+20.00 (+25.0%)",1,true))
+
+fullResult={score=100,record={stats={}},comparisons={
+    {delta=10,percent=11.111,status="upgrade",baseline=90},
+    {delta=0,percent=0,status="equal",baseline=100},
+}}
+baseResult={score=100,record={stats={}},comparisons={
+    {delta=10,percent=11.111,status="upgrade",baseline=90},
+    {delta=20,percent=25,status="upgrade",baseline=80},
+}}
+local secondRingDifference=decorateRelevant("BaseSecondRingDifference")
+assert(#secondRingDifference.lines==3 and hasBase(secondRingDifference), "the second ring's differing comparison keeps Base")
+assert(secondRingDifference.lines[3].right:find(" | ",1,true) and secondRingDifference.lines[3].right:find("+20.00 (+25.0%)",1,true))
+
+fullResult=compared(100.004,10.004,11.144)
+baseResult=compared(100.001,10.001,11.141)
+local roundedComparisons=decorateRelevant("RoundedBaseComparisons")
+assert(#roundedComparisons.lines==2 and not hasBase(roundedComparisons), "values identical at tooltip precision hide Base")
+assert(roundedComparisons.lines[2].right:find("100.00",1,true) and roundedComparisons.lines[2].right:find("+10.00 (+11.1%)",1,true))
+FW.DB.options.showComparisons=false
+fullScore,baseScore=100.004,100.001
+local roundedScores=decorateRelevant("RoundedBaseScores")
+assert(#roundedScores.lines==2 and not hasBase(roundedScores), "rounded-identical scores hide Base when comparisons are disabled")
+fullScore,baseScore=100,100
+local equalEquipped=decorateRelevant("EqualEquippedBase",true)
+assert(#equalEquipped.lines==2 and not hasBase(equalEquipped), "equipped tooltips suppress an identical Base score")
+baseScore=80
+local differingEquipped=decorateRelevant("DifferingEquippedBase",true)
+assert(#differingEquipped.lines==3 and differingEquipped.lines[3].right=="80.00", "equipped tooltips retain a differing Base score")
+fullScore,baseScore=nil,nil
+fullRecord,baseRecord="Item data loading","Item data loading"
+local duplicateScoreLoading=decorateRelevant("DuplicateBaseScoreLoading")
+assert(#duplicateScoreLoading.lines==2 and not hasBase(duplicateScoreLoading), "duplicate score-reader loading errors hide Base without comparisons")
+baseRecord="Base item data loading"
+local differingScoreLoading=decorateRelevant("DifferentBaseScoreLoading")
+assert(#differingScoreLoading.lines==3 and differingScoreLoading.lines[3].text=="  Base: Base item data loading", "different score-reader errors retain Base without comparisons")
+fullScoreError="excluded"
+fullRecord={stats={}}
+baseScore,baseRecord=80,{stats={}}
+local excludedScoreBase=decorateRelevant("ExcludedBaseScore",true)
+assert(#excludedScoreBase.lines==0 and not hasBase(excludedScoreBase), "excluded equipped items cannot expose a Base score")
+fullScoreError=nil
+fullScore,baseScore=100,100
+fullRecord,baseRecord={stats={}},{stats={}}
+FW.DB.options.showComparisons=true
+
+fullResult,baseResult=nil,nil
+fullError,baseError="Item data loading","Item data loading"
+local duplicateLoading=decorateRelevant("DuplicateBaseLoading")
+assert(#duplicateLoading.lines==2 and not hasBase(duplicateLoading), "duplicate loading errors do not add Base")
+assert(duplicateLoading.lines[2].text=="Melee: Item data loading" and DuplicateBaseLoadingTextLeft2.size==12)
+fullError,baseError="Cannot evaluate item","Cannot evaluate item"
+local duplicateError=decorateRelevant("DuplicateBaseError")
+assert(#duplicateError.lines==2 and not hasBase(duplicateError), "duplicate reader errors do not add Base")
+baseError="Base item data loading"
+local differingError=decorateRelevant("DifferentBaseError")
+assert(#differingError.lines==3 and differingError.lines[3].text=="  Base: Base item data loading", "different full/base errors keep the Base error")
+fullResult,fullError=compared(100,10,11.111),nil
+baseError="Item data loading"
+local unavailableBase=decorateRelevant("UnavailableRelevantBase")
+assert(#unavailableBase.lines==3 and unavailableBase.lines[2].right:find("100.00",1,true), "pending Base data does not hide the full score")
+assert(unavailableBase.lines[3].text=="  Base: Item data loading")
+fullResult={score=100,record={stats={}},comparisons={{error="Equipped item data loading"}}}
+baseResult={score=100,record={stats={}},comparisons={{error="Equipped item data loading"}}}
+baseError=nil
+local duplicateComparisonError=decorateRelevant("DuplicateBaseComparisonError")
+assert(#duplicateComparisonError.lines==3 and not hasBase(duplicateComparisonError), "duplicate unavailable comparisons hide Base")
+assert(duplicateComparisonError.lines[2].right:find("comparison unavailable",1,true) and duplicateComparisonError.lines[3].text=="  Equipped item data loading", "suppressed comparison errors still provide one diagnostic note")
+baseResult,baseError=compared(100,10,11.111),nil
+fullResult,fullError=nil,"Item data loading"
+local unavailableFull=decorateRelevant("UnavailableRelevantFull")
+assert(#unavailableFull.lines==3 and unavailableFull.lines[3].right:find("100.00",1,true), "available Base scores remain visible while full data is pending")
+
+-- Hidden Base rows still contribute extraction and baseline warnings. Relevance
+-- depends on visible values, not whether both readers report the same issues.
+fullResult,fullError=compared(100,10,11.111),nil
+baseResult=compared(100,10,11.111)
+baseResult.record.partial=true
+local hiddenBaseIssues=decorateRelevant("HiddenBaseIssues")
+assert(#hiddenBaseIssues.lines==3 and not hasBase(hiddenBaseIssues), "hidden Base extraction issues do not force a duplicate value row")
+assert(hiddenBaseIssues.lines[3].text=="Partial stat data; /zv inspect or /zv exportissues.", "hidden Base extraction issues propagate their warning")
+baseResult.record.partial=false
+baseResult.comparisons[1].hasIssues=true
+local hiddenBaselineIssues=decorateRelevant("HiddenBaseBaselineIssues")
+assert(#hiddenBaselineIssues.lines==3 and not hasBase(hiddenBaselineIssues), "hidden Base baseline issues do not force a duplicate row")
+assert(hiddenBaselineIssues.lines[3].text:find("exportissues",1,true), "hidden Base baseline issues propagate their warning")
+
+fullResult={excluded=true,record={stats={}},comparisons={}}
+baseResult=compared(80,5,6.667)
+local priorBaseCalls=relevantCalls.base
+local excludedBase=decorateRelevant("ExcludedBaseProfile")
+assert(#excludedBase.lines==0 and not hasBase(excludedBase), "excluded full items cannot expose Base")
+assert(relevantCalls.base==priorBaseCalls, "excluded full items do not request a Base read")
+
+-- A native refresh can reuse a FontString that previously held a shrunken Base
+-- row. Suppressing that row must restore its original font for future content.
+fullResult=compared(100,10,11.111)
+baseResult=compared(80,5,6.667)
+local relevanceRefresh=decorateRelevant("RelevantBaseRefresh")
+assert(#relevanceRefresh.lines==3 and math.abs(RelevantBaseRefreshTextLeft3.size-10.2)<1e-9)
+function relevanceRefresh:RefreshData()
+    self:Clear()
+    postCall(self,{hyperlink=self.link})
+end
+baseResult=compared(100,10,11.111)
+FW.equipmentRevision=FW.equipmentRevision+1
+FW:RefreshTooltips()
+assert(#relevanceRefresh.lines==2 and not hasBase(relevanceRefresh), "native refresh removes a newly redundant Base row")
+assert(RelevantBaseRefreshTextLeft3.size==12 and RelevantBaseRefreshTextRight3.size==12 and relevanceRefresh.fwBaseFonts==nil, "removed Base rows restore reused FontStrings")
+relevanceRefresh:Clear()
+relevanceRefresh:AddLine("Native row one")
+relevanceRefresh:AddLine("Native row two")
+relevanceRefresh:AddLine("Native row three")
+assert(RelevantBaseRefreshTextLeft3.size==12 and RelevantBaseRefreshTextRight3.size==12, "native rows inherit normal fonts after Base disappears")
+relevanceRefresh:Clear()
+baseResult=compared(80,5,6.667)
+postCall(relevanceRefresh,{hyperlink=variant})
+assert(#relevanceRefresh.lines==3 and math.abs(RelevantBaseRefreshTextLeft3.size-10.2)<1e-9, "reappearing Base rows shrink once without accumulating")
+relevanceRefresh:Hide()
+assert(RelevantBaseRefreshTextLeft3.size==12 and RelevantBaseRefreshTextRight3.size==12)
 print("Tooltip tests passed")
