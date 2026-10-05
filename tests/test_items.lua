@@ -15,7 +15,8 @@ local function newReader(item)
     GetLocale = function() return locale end
     GetItemInfo = function(link)
         if not cached then return nil end
-        return current.name or "Test Item", link, 4, 60, 60, "Armor", "Plate", 1, current.equipLoc or "INVTYPE_HEAD"
+        return current.name or "Test Item", link, 4, 60, 60, "Armor", "Plate", 1,
+            current.equipLoc or "INVTYPE_HEAD", nil, nil, current.classID, current.subclassID
     end
     GetItemStats = function() legacyCalls = legacyCalls + 1; return current.legacy end
     C_Item = {
@@ -324,7 +325,7 @@ for _, sample in ipairs(foreverCases) do
     equal(next(item.unresolvedStats), nil)
     equal(FW:GetIssueReport().itemCount, 0)
     equal(FW:GetItem("item:" .. sample.id .. ":8481"), item, "resolved item caches")
-    equal(item.parserVersion, 4, "old persisted parser results receive a new key")
+    equal(item.parserVersion, 5, "old persisted parser results receive a new key")
 end
 
 FW = newReader({ raw = { RESISTANCE0_NAME = 141, ITEM_MOD_STAMINA_SHORT = 4 },
@@ -366,5 +367,57 @@ item = assert(FW:GetItem("item:128:1"))
 equal(item.stats.fireDamage, 20)
 equal(item.stats.spellDamage, 5, "an enchant cannot preserve a false generic alias for school-only damage")
 equal(item.partial, false)
+
+-- Ammunition is an explicit scoring exception and contributes ranged DPS,
+-- without requiring a weapon's damage range or attack speed.
+local originalAmmoFormat = ITEM_AMMO_DAMAGE_TEMPLATE
+for index, sample in ipairs({
+    {raw={},line="Adds 7.5 damage per second",expected=7.5},
+    {raw={},line="Ajoute 7,5 points de dégâts par seconde",locale="frFR",expected=7.5},
+    {raw={},line="Ajoute 8 dégâts par seconde",locale="frFR",expected=8},
+    {raw={},line="Projectile DPS: 9.5",format="Projectile DPS: %1$.1f",expected=9.5},
+    {raw={ITEM_MOD_DAMAGE_PER_SECOND_SHORT=7.5,ITEM_MOD_DAMAGE_PER_SECOND=7.5},
+        line="Adds 7.5 damage per second",expected=7.5},
+    {raw={ITEM_MOD_DAMAGE_PER_SECOND=0},line="Arrow",expected=0},
+    {raw={ITEM_MOD_DAMAGE_PER_SECOND_SHORT=6},line="Bullet",expected=6},
+}) do
+    ITEM_AMMO_DAMAGE_TEMPLATE = sample.format
+    FW = newReader({raw=sample.raw,classID=6,subclassID=2,equipLoc="INVTYPE_AMMO",lines={"Test Arrow",sample.line}})
+    locale = sample.locale or "enUS"
+    item = assert(FW:GetItem("item:" .. (500+index)))
+    equal(item.stats.rangedDps,sample.expected)
+    equal(item.stats.dps,nil,"ammo DPS is never melee DPS")
+    equal(item.stats.rangedSpeed,nil); equal(item.stats.lowDamage,nil); equal(item.stats.highDamage,nil)
+    equal(item.partial,false,"ammo does not need weapon speed or damage range")
+    equal(next(item.unresolvedStats),nil); equal(#item.warnings,0)
+    local weights = assert(FW:CreateProfile("Ammo",{rangedDps=2,dps=100}))
+    equal(FW:GetScore(item.link,weights),sample.expected*2,"only the ranged DPS weight applies")
+    equal(FW:GetBaseScore(item.link,weights),sample.expected*2)
+end
+ITEM_AMMO_DAMAGE_TEMPLATE = originalAmmoFormat
+
+FW = newReader({raw={},classID=6,subclassID=3,equipLoc="INVTYPE_AMMO",lines={"Unreadable Bullet","Bullet"}})
+item = assert(FW:GetItem("item:510"))
+equal(item.partial,true); equal(item.unresolvedStats.rangedDps,true)
+equal(FW.DB.cache.items[item.key],nil,"missing ammo DPS is never cached as a complete zero")
+
+FW = newReader({raw={},classID=6,subclassID=2,equipLoc="INVTYPE_AMMO",lines={"Arrow","Adds 7.5 damage per second"}})
+local ammoProfile = assert(FW:CreateProfile("Cache migration",{rangedDps=2,dps=100}))
+local oldAmmoKey = FW:ItemKey("item:511"):gsub("^5|","4|")
+FW.DB.cache.items[oldAmmoKey] = {key=oldAmmoKey,stats={dps=7.5},equipLoc="INVTYPE_AMMO"}
+FW.DB.cache.scores[oldAmmoKey] = {[ammoProfile.id]={revision=ammoProfile.revision,score=750}}
+equal(FW:GetScore("item:511",ammoProfile),15,"parser update ignores ammo previously cached as melee DPS")
+equal(modernCalls,1,"stale ammo stats are read again")
+
+FW = newReader({raw={ITEM_MOD_DAMAGE_PER_SECOND_SHORT=7.5},classID=6,subclassID=2,equipLoc="INVTYPE_AMMO"})
+item = assert(FW:GetItem("item:512"))
+equal(item.stats.rangedDps,7.5)
+for _, key in ipairs({"dps","lowDamage","highDamage","weaponDamage","speed","rangedSpeed"}) do
+    equal(item.unresolvedStats[key],nil,"ammo never requires weapon fields, even without a tooltip")
+end
+local apiAmmoProfile = assert(FW:CreateProfile("API ammo",{rangedDps=2,rangedSpeed=10,dps=100}))
+local apiAmmoScore, _, apiAmmoNote = FW:GetScore(item.link,apiAmmoProfile)
+equal(apiAmmoScore,15)
+assert(not apiAmmoNote:find("speed",1,true),"missing ammo tooltip must not invent a speed warning")
 
 print("Items tests passed")

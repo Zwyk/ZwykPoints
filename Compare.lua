@@ -8,9 +8,10 @@ local slotsByType = {
     INVTYPE_WEAPONMAINHAND={16}, INVTYPE_WEAPONOFFHAND={17},
     INVTYPE_SHIELD={17}, INVTYPE_HOLDABLE={17}, INVTYPE_2HWEAPON={16,17},
     INVTYPE_RANGED={18}, INVTYPE_RANGEDRIGHT={18}, INVTYPE_THROWN={18},
-    INVTYPE_RELIC={18}, INVTYPE_TABARD={19},
+    INVTYPE_RELIC={18}, INVTYPE_TABARD={19}, INVTYPE_AMMO={INVSLOT_AMMO or 0},
 }
 local slotNames = {
+    [INVSLOT_AMMO or 0]="Ammunition",
     [1]="Head", [2]="Neck", [3]="Shoulders", [4]="Shirt", [5]="Chest",
     [6]="Waist", [7]="Legs", [8]="Feet", [9]="Wrists", [10]="Hands",
     [11]="Ring 1", [12]="Ring 2", [13]="Trinket 1", [14]="Trinket 2",

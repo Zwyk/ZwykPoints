@@ -1,4 +1,4 @@
-# ZwykValues 0.1.10
+# ZwykValues 0.1.11
 
 A standalone stat-weight addon written from scratch for WoW Forever. No Pawn code, Pawn dependency, third-party libraries, or online item database is required.
 
@@ -68,7 +68,9 @@ English and French static tooltip text are supported, with localized Blizzard fo
 
 ## Tooltip comparisons
 
-Only character gear is scored: weapons, armor, jewelry, shields/offhands, relics, shirts and tabards. Consumables, quest items, crafting materials, bags/quivers, ammunition, profession equipment and other non-gear items show no full/Base values, comparisons, upgrade arrows or stat-debug markers. This applies to every profile, including old cached totals. Gear still follows the profile's item filters.
+Character gear and ammunition are scored: weapons, armor, jewelry, shields/offhands, relics, shirts and tabards. Consumables, quest items, crafting materials, bags/quivers, profession equipment and other non-gear items show no full/Base values, comparisons, upgrade arrows or stat-debug markers. This applies to every profile, including old cached totals. Gear still follows the profile's item filters.
+
+Ammunition's added damage per second uses the existing **Ranged weapon DPS** weight (`rangedDps`). For example, 7.5 ammo DPS at weight 2 gives 15 points. Ammo compares with the equipped ammunition slot; full/Base values and main-profile upgrade arrows use the same score. Weapon and armor subtype checkboxes do not exclude ammo. Ammunition does not require weapon speed or a damage range, and unreadable DPS remains partial rather than becoming a cached zero.
 
 Every active profile adds one row with its name and score in the profile color. Candidate items show the signed point difference and percentage difference inline, with only the comparison fragment colored green for an increase, red for a decrease, or gray for equality:
 
@@ -108,7 +110,7 @@ Native Blizzard bags and loot-roll windows are supported. BetterBags 0.5.14 is a
 
 Other third-party bag addons can integrate their buttons explicitly with `ZwykValues:RegisterUpgradeItemButton(button, linkProvider)` and re-register after their own slot updates; `linkProvider(button)` must return the current full item link or nil.
 
-After upgrading to 0.1.7, parser-versioned cache keys automatically refresh item stats, type metadata and scores. Issue exports intentionally preserve historical problems: use `/zv clearissues`, then hover the items again to collect a report for the new parser.
+After upgrading to 0.1.11, parser-versioned cache keys automatically refresh item stats and scores, including older ammo entries stored under melee DPS. Issue exports intentionally preserve historical problems: use `/zv clearissues`, then hover the items again to collect a report for the new parser.
 
 ## Debugging unrecognized stats
 

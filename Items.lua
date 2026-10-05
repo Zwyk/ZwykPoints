@@ -1,5 +1,5 @@
 local _, FW = ...
-local MAX_ITEMS, PARSER_VERSION = 2000, 4
+local MAX_ITEMS, PARSER_VERSION = 2000, 5
 
 local function number(value)
     if issecretvalue and issecretvalue(value) then return nil end
@@ -33,6 +33,11 @@ local function itemPayload(link)
     if type(link) == "number" and link > 0 then return "item:" .. math.floor(link) end
     if type(link) ~= "string" then return nil end
     return link:match("(item:[^|%s]+)")
+end
+
+local function rangedItem(record)
+    return record.equipLoc == "INVTYPE_RANGED" or record.equipLoc == "INVTYPE_RANGEDRIGHT"
+        or record.equipLoc == "INVTYPE_THROWN" or record.equipLoc == "INVTYPE_AMMO"
 end
 
 function FW:GetBaseItemLink(link)
@@ -555,8 +560,22 @@ local function unrecognized(record, line, index, reason)
     record.partial = true
 end
 
+local function ammoDps(content)
+    local format = lower(clean(_G.ITEM_AMMO_DAMAGE_TEMPLATE)):gsub("%.$", "")
+    local first, last = format:find("%%[%d%$%.]*[dfgs]")
+    local value
+    if first then
+        value = number(content:match("^" .. escape(format:sub(1, first-1))
+            .. "([%+%-]?[%d%.,]+)" .. escape(format:sub(last+1)) .. "$"))
+    end
+    return value or number(content:match("^adds ([%d%.,]+) damage per second$"))
+        or number(content:match("^ajoute ([%d%.,]+) points de dégâts par seconde$"))
+        or number(content:match("^ajoute ([%d%.,]+) dégâts par seconde$"))
+end
+
 local function scan(record, lines)
     local parsed, enchants, percentages, weapon = {}, {}, {}, {}
+    local ammo = record.equipLoc == "INVTYPE_AMMO"
     local locale = GetLocale and GetLocale() or "enUS"
     local supportedLocale = locale == "enUS" or locale == "enGB" or locale == "frFR"
     if not supportedLocale then
@@ -609,6 +628,7 @@ local function scan(record, lines)
             if speed then weapon.speed, handled = speed, true end
             local dps = number(content:match("^%(([%d%.,]+) damage per second%)$"))
                 or number(content:match("^%(([%d%.,]+) dégâts par seconde%)$"))
+            if ammo then dps = dps or ammoDps(content) end
             if dps then weapon.dps, handled = dps, true end
 
             -- Expertise's explicitly displayed dodge-and-parry reduction is
@@ -757,16 +777,21 @@ local function scan(record, lines)
         record.stats.lowDamage, record.stats.highDamage = weapon.low, weapon.high
         if weapon.speed and weapon.speed > 0 then weapon.dps = weapon.dps or (weapon.low + weapon.high) / 2 / weapon.speed end
     end
-    local ranged = record.equipLoc == "INVTYPE_RANGED" or record.equipLoc == "INVTYPE_RANGEDRIGHT" or record.equipLoc == "INVTYPE_THROWN"
+    local ranged = rangedItem(record)
     if weapon.speed then record.stats[ranged and "rangedSpeed" or "speed"] = weapon.speed end
     if weapon.dps then record.stats[ranged and "rangedDps" or "dps"] = weapon.dps end
-    local weaponItem = ranged or record.equipLoc == "INVTYPE_WEAPON" or record.equipLoc == "INVTYPE_2HWEAPON"
+    local weaponItem = (ranged and not ammo) or record.equipLoc == "INVTYPE_WEAPON" or record.equipLoc == "INVTYPE_2HWEAPON"
         or record.equipLoc == "INVTYPE_WEAPONMAINHAND" or record.equipLoc == "INVTYPE_WEAPONOFFHAND"
     if weaponItem and (not weapon.low or not weapon.high or not weapon.speed) then
         for _, key in ipairs({ "lowDamage", "highDamage", ranged and "rangedSpeed" or "speed", ranged and "rangedDps" or "dps" }) do
             if record.stats[key] == nil then record.unresolvedStats[key] = true end
         end
         warn(record, "Weapon damage or speed was not available from the tooltip.")
+        record.partial = true
+    end
+    if ammo and record.stats.rangedDps == nil then
+        record.unresolvedStats.rangedDps = true
+        warn(record, "Ammunition DPS was not available from the item data or tooltip.")
         record.partial = true
     end
 end
@@ -814,7 +839,7 @@ function FW:GetItem(link)
                 warn(record, "Item API spell power value was not available."); record.partial = true
             end
         elseif rawKey == "ITEM_MOD_DAMAGE_PER_SECOND_SHORT" or rawKey == "ITEM_MOD_DAMAGE_PER_SECOND" then
-            local ranged = record.equipLoc == "INVTYPE_RANGED" or record.equipLoc == "INVTYPE_RANGEDRIGHT" or record.equipLoc == "INVTYPE_THROWN"
+            local ranged = rangedItem(record)
             maximum(record.stats, ranged and "rangedDps" or "dps", value)
             if value == nil then
                 record.unresolvedStats[ranged and "rangedDps" or "dps"] = true
@@ -830,9 +855,11 @@ function FW:GetItem(link)
     if #diagnostic.tooltipLines == 0 then
         warn(record, "Item tooltip data was not available; tooltip-only stats may be missing.")
         record.partial = true
+        local ammo = record.equipLoc == "INVTYPE_AMMO"
+        local weaponOnly = {dps=true,lowDamage=true,highDamage=true,weaponDamage=true,speed=true,rangedSpeed=true}
         for _, stat in ipairs({ "hp5", "mp5", "arcaneDamage", "fireDamage", "natureDamage", "frostDamage", "shadowDamage", "holyDamage",
             "feralAttackPower", "dps", "lowDamage", "highDamage", "weaponDamage", "speed", "rangedDps", "rangedSpeed", "armorBonus", "blockValueBonus" }) do
-            if record.stats[stat] == nil then record.unresolvedStats[stat] = true end
+            if record.stats[stat] == nil and not (ammo and weaponOnly[stat]) then record.unresolvedStats[stat] = true end
         end
     else scan(record, diagnostic.tooltipLines) end
     for _, rawKey in ipairs(diagnostic.unknownKeys) do

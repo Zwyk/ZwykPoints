@@ -330,7 +330,9 @@ local nonGear = {
     {label="equippable quest prop", classID=12, equipLoc="INVTYPE_HOLDABLE"},
     {label="bag", classID=1, equipLoc="INVTYPE_BAG"},
     {label="quiver", classID=11, equipLoc="INVTYPE_QUIVER"},
-    {label="ammunition", classID=6, equipLoc="INVTYPE_AMMO"},
+    {label="projectile in a weapon slot", classID=6, equipLoc="INVTYPE_RANGED"},
+    {label="projectile without an ammunition slot", classID=6, equipLoc=""},
+    {label="armor in an ammunition slot", classID=4, equipLoc="INVTYPE_AMMO"},
     {label="profession tool", classID=19, equipLoc="INVTYPE_PROFESSION_TOOL"},
     {label="profession accessory", classID=19, equipLoc="INVTYPE_PROFESSION_GEAR"},
     {label="unsupported weapon slot", classID=2, equipLoc="INVTYPE_PROFESSION_TOOL"},
@@ -390,6 +392,29 @@ for index, data in ipairs({
 end
 local legacyGear = fixture("item:4110:0", nil, nil, 9, "INVTYPE_HEAD", nil, false)
 equal(FW:GetScore(legacyGear.link, main), 9, "known gear slot works without optional class metadata")
+
+-- Ammunition remains eligible and contributes through the existing ranged DPS
+-- weight. Weapon/armor subtype choices do not classify projectiles as either.
+local ammoProfile = assert(FW:CreateProfile("Ammunition", {rangedDps=2}))
+local excludeTypes = {includeOtherClasses=true, weapons={}, armor={}}
+for _, group in ipairs(FW.ItemFilterGroups) do
+    for _, itemType in ipairs(group.types) do excludeTypes[group.key][itemType.key] = false end
+end
+assert(FW:UpdateProfile(ammoProfile.id, {itemFilters=excludeTypes}))
+local ammunition = fixture("item:4130:42:0", 6, 2, 0, "INVTYPE_AMMO")
+local baseAmmunition = fixture("item:4130:0:0", 6, 2, 0, "INVTYPE_AMMO")
+ammunition.stats, baseAmmunition.stats = {rangedDps=4}, {rangedDps=2.5}
+equal(FW:GetScore(ammunition.link, ammoProfile), 8, "ammunition uses the ranged DPS weight")
+equal(FW:GetBaseScore(ammunition.link, ammoProfile), 5, "ammunition Base score uses its unenchanted variant")
+local ammoComputed = scoreCalls
+equal(FW:GetScore(ammunition.link, ammoProfile), 8)
+equal(FW:GetBaseScore(ammunition.link, ammoProfile), 5)
+equal(scoreCalls, ammoComputed, "ammunition full and Base totals use the persistent score cache")
+equal(FW:GetScore(ammunition.link, ammoProfile, true), 8, "equipped ammunition follows the same ranged DPS scoring")
+local legacyAmmo = fixture("item:4131:0", nil, nil, 0, "INVTYPE_AMMO", nil, false)
+legacyAmmo.stats = {rangedDps=3}
+equal(FW:GetScore(legacyAmmo.link, main), 0, "ammunition is eligible on legacy tuples without class IDs")
+equal(FW:GetScore(ammunition.link, main), 0, "zero ranged DPS weight gives eligible ammunition a zero total")
 
 -- Missing or secret equipment metadata waits; completing it restores scoring
 -- without changing the profile or preserving an excluded/loading decision.

@@ -17,6 +17,9 @@ local itemDB={
     ["item:109:0:0:0:0:0:0:0:60"]={name="Strength potion",strength=99,crit=1,equipLoc="",classID=0,unknown=3},
     ["item:110:0:0:0:0:0:0:0:60"]={name="Quest item",strength=99,crit=1,equipLoc="",classID=12},
     ["item:111:0:0:0:0:0:0:0:60"]={name="Bag",strength=99,crit=1,equipLoc="INVTYPE_BAG",classID=1},
+    ["item:112:0:0:0:0:0:0:0:60"]={name="New arrows",ammoDps=7.5,equipLoc="INVTYPE_AMMO",classID=6,subclassID=2},
+    ["item:113:0:0:0:0:0:0:0:60"]={name="Equipped arrows",ammoDps=4,equipLoc="INVTYPE_AMMO",classID=6,subclassID=2},
+    ["item:114:0:0:0:0:0:0:0:60"]={name="Equipped bow",strength=99,crit=1,equipLoc="INVTYPE_RANGED",classID=2,subclassID=2},
 }
 local candidate="item:100:0:0:0:0:0:0:0:60"
 local baseline="item:101:0:0:0:0:0:0:0:60"
@@ -30,6 +33,7 @@ local function definition(link)
 end
 local function sourceLines(link)
     local item=definition(link)
+    if item.ammoDps then return {item.name,"Adds " .. item.ammoDps .. " damage per second"} end
     local lines = {item.name,"+" .. item.strength .. " Strength",
         "Equip: Increases your chance to get a critical strike by " .. item.crit .. "%."}
     if item.unknown then lines[#lines+1]="+" .. item.unknown .. " Mystic Focus" end
@@ -52,6 +56,7 @@ C_Item={
     GetItemStats=function(link)
         reads=reads+1
         local item=definition(link)
+        if item.ammoDps then return {ITEM_MOD_DAMAGE_PER_SECOND_SHORT=item.ammoDps} end
         local stats = {ITEM_MOD_STRENGTH_SHORT=item.strength,ITEM_MOD_CRIT_SHORT=item.crit}
         if item.unknown then stats.ITEM_MOD_FOREVER_FOCUS_SHORT=item.unknown end
         return stats
@@ -236,6 +241,39 @@ end
 assert(scoreCalls==beforeNonGearScores, "non-gear is never weighted")
 assert(FW:GetIssueReport().itemCount==beforeNonGearIssues, "non-gear creates no missing-stat issues")
 FW.DB.options.debugUnknownStats = false
+
+-- Ammunition DPS uses the ranged weight and compares against the ammo slot,
+-- not the equipped ranged weapon. Full/Base rows and upgrade links agree.
+local ammoProfile = assert(FW:CreateProfile("Ammunition",{rangedDps=2,rangedSpeed=10,dps=100}))
+assert(FW:SetMainProfile(ammoProfile.id))
+local ammoLink="item:112:0:0:0:0:0:0:0:60"
+local ammoBaseline="item:113:0:0:0:0:0:0:0:60"
+local nativeInventoryLink=GetInventoryItemLink
+GetInventoryItemLink=function(unit,slot)
+    if slot==0 then return ammoBaseline end
+    if slot==18 then return "item:114:0:0:0:0:0:0:0:60" end
+    return nativeInventoryLink(unit,slot)
+end
+GameTooltip:SetHyperlink(ammoLink)
+assert(findLine("Ammunition").right=="15.00  |cff40ff59|TInterface\\AddOns\\ZwykValues\\Textures\\ArrowUp:12:12:0:0|t+7.00 (+87.5%)|r")
+local ammoBaseRows=0
+for _, line in ipairs(GameTooltip.lines) do
+    if line.left=="  Base" and line.right:find("15.00",1,true) then ammoBaseRows=ammoBaseRows+1 end
+end
+assert(ammoBaseRows==1 and not findLine("Partial stat data; /zv inspect or /zv exportissues."))
+local ammoComparison=assert(FW:CompareBaseItem(ammoLink,ammoProfile))
+assert(#ammoComparison.comparisons==1 and ammoComparison.comparisons[1].slots[1]==0)
+assert(ammoComparison.comparisons[1].baseline==8 and ammoComparison.comparisons[1].label=="Ammunition")
+assert(FW:IsMainProfileUpgrade(ammoLink))
+assert(FW:DecorateUpgradeChatMessage("|H" .. ammoLink .. "|h[Arrows]|h"):find("ArrowUp",1,true))
+local afterAmmoScores=scoreCalls
+GameTooltip:SetHyperlink(ammoLink)
+assert(scoreCalls==afterAmmoScores,"ammo tooltip reuses full and Base score caches")
+ammoBaseline=nil
+FW.equipmentRevision=1
+ammoComparison=assert(FW:CompareItem(ammoLink,ammoProfile))
+assert(ammoComparison.comparisons[1].baseline==0 and ammoComparison.comparisons[1].percent==nil)
+GetInventoryItemLink=nativeInventoryLink
 
 -- SavedVariables reused by a fresh addon namespace keep valid item totals.
 local persisted=ZwykValuesDB

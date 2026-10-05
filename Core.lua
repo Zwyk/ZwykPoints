@@ -6,7 +6,7 @@ local secondaryKeys = { hit = true, crit = true, haste = true, expertise = true,
 FW.SecondaryStatKeys = secondaryKeys
 local upgradeOptions = { upgradeBags = true, upgradeRolls = true, upgradeChat = true }
 local defaultColor = { r = 0.35, g = 0.8, b = 1 }
--- Character gear only; storage, ammunition and profession slots are excluded.
+-- Character gear and ammunition; storage and profession slots are excluded.
 local gearEquipLocations = {
     INVTYPE_HEAD=true, INVTYPE_NECK=true, INVTYPE_SHOULDER=true, INVTYPE_BODY=true,
     INVTYPE_CHEST=true, INVTYPE_ROBE=true, INVTYPE_WAIST=true, INVTYPE_LEGS=true,
@@ -19,11 +19,13 @@ local gearEquipLocations = {
 
 function FW:IsGearItem(record)
     if not record then return nil, "Item equipment data is not available yet." end
-    if record.classID ~= nil and record.classID ~= 2 and record.classID ~= 4 then return false end
+    if record.classID ~= nil and record.classID ~= 2 and record.classID ~= 4 and record.classID ~= 6 then return false end
     local equipLoc = record.equipLoc
     if (issecretvalue and issecretvalue(equipLoc)) or type(equipLoc) ~= "string" then
         return nil, "Item equipment data is not available yet."
     end
+    if equipLoc == "INVTYPE_AMMO" then return record.classID == nil or record.classID == 6 end
+    if record.classID == 6 then return false end
     return gearEquipLocations[equipLoc] == true
 end
 
@@ -115,7 +117,8 @@ function FW:IsItemAllowed(record, profile)
         return false
     end
     local group = record.classID == 2 and filters.weapons or record.classID == 4 and filters.armor
-    if record.classID == nil and (hasExclusions(filters.weapons) or hasExclusions(filters.armor)) then
+    if record.classID == nil and record.equipLoc ~= "INVTYPE_AMMO"
+        and (hasExclusions(filters.weapons) or hasExclusions(filters.armor)) then
         return nil, "Item type data is not available yet."
     end
     if group then
