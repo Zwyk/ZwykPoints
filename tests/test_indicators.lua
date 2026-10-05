@@ -91,6 +91,8 @@ GroupLootContainer_OpenNewFrame = function() end
 assert(loadfile("Indicators.lua"))("ZwykValues", FW)
 FW:InstallUpgradeIndicators(); pump()
 assert(FW.UpgradeIndicatorFrame.events.BAG_UPDATE and FW.UpgradeIndicatorFrame.events.START_LOOT_ROLL)
+assert(not FW.UpgradeIndicatorFrame.events.GET_ITEM_INFO_RECEIVED and not FW.UpgradeIndicatorFrame.events.ITEM_DATA_LOAD_RESULT,
+    "item-data completions are coordinated centrally, not subscribed to independently")
 assert(#scored == 0 and #first.textures == 0 and #roll.IconFrame.textures == 0)
 local eventFrame = FW.UpgradeIndicatorFrame
 FW:InstallUpgradeIndicators(); assert(FW.UpgradeIndicatorFrame == eventFrame)
@@ -100,6 +102,12 @@ local onClick = function() end; first.scripts.OnClick = onClick
 verdicts["item:100"], verdicts["item:103"], verdicts["item:104"] = true, true, true
 FW.DB.options.upgradeBags, FW.DB.options.upgradeRolls = true, true
 FW:RefreshUpgradeIndicators(); assert(#timers == 1); pump()
+assert(#scored == 4, "a full refresh checks each of three bag buttons and one roll icon exactly once")
+local onePass = {}
+for _, link in ipairs(scored) do onePass[link] = (onePass[link] or 0) + 1 end
+for _, link in ipairs({"item:100", "item:101", "item:103", "item:104"}) do
+    assert(onePass[link] == 1, "discovery must not score again before the registry paint: " .. link)
+end
 assert(first.zvUpgradeArrow.shown and not second.zvUpgradeArrow)
 assert(legacyItem.zvUpgradeArrow.shown and roll.IconFrame.zvUpgradeArrow.shown)
 assert(first.scripts.OnClick == onClick and first.zvUpgradeArrow.w == 16 and first.zvUpgradeArrow.h == 16)
@@ -146,7 +154,13 @@ legacy.id = 1; ContainerFrame_GenerateFrame(legacy); assert(legacyItem.zvUpgrade
 -- Roll frames are recycled, cancel immediately, and may wait for item data.
 roll.rollID = 11; GroupLootFrame_SetupItemDisplay(roll); assert(not roll.IconFrame.zvUpgradeArrow.shown)
 verdicts["item:105"] = true
-eventFrame:Fire("OnEvent", "ITEM_DATA_LOAD_RESULT", 105, true); pump(); assert(roll.IconFrame.zvUpgradeArrow.shown)
+roll.IconFrame.zvUpgradeArrow:Hide()
+GroupLootFrame_SetupItemDisplay(roll, true)
+assert(roll.IconFrame.zvUpgradeArrow.shown, "extra native setup arguments must not become discovery deferPaint")
+roll.IconFrame.zvUpgradeArrow:Hide()
+GroupLootFrame_OnShow(roll, true)
+assert(roll.IconFrame.zvUpgradeArrow.shown, "extra native show arguments must retain immediate paint")
+FW:RefreshUpgradeIndicators(); pump(); assert(roll.IconFrame.zvUpgradeArrow.shown)
 eventFrame:Fire("OnEvent", "CANCEL_LOOT_ROLL", 11)
 assert(not roll.IconFrame.zvUpgradeArrow.shown); pump(); assert(not roll.IconFrame.zvUpgradeArrow.shown)
 eventFrame:Fire("OnEvent", "START_LOOT_ROLL", 11); pump(); assert(roll.IconFrame.zvUpgradeArrow.shown)
@@ -156,7 +170,7 @@ eventFrame:Fire("OnEvent", "CANCEL_ALL_LOOT_ROLLS"); pump(); assert(not roll.Ico
 roll.rollID = 12; rolls[12] = nil; GroupLootFrame_SetupItemDisplay(roll)
 assert(not roll.IconFrame.zvUpgradeArrow.shown)
 rolls[12], verdicts["item:106"] = "item:106", true
-eventFrame:Fire("OnEvent", "GET_ITEM_INFO_RECEIVED", 106); pump(); assert(roll.IconFrame.zvUpgradeArrow.shown)
+FW:RefreshUpgradeIndicators(); pump(); assert(roll.IconFrame.zvUpgradeArrow.shown)
 
 -- Third-party integration is explicit; providers are live and may return no data.
 local custom = object("CustomBagItem")

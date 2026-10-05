@@ -1,6 +1,6 @@
 local addonName, FW = ...
 _G.ZwykValues = FW
-FW.version = "0.1.12"
+FW.version = "0.1.13"
 
 function FW:Print(message)
     local text = "|cff80ccffZwykValues:|r " .. tostring(message)
@@ -91,22 +91,25 @@ eventFrame:SetScript("OnEvent", function(_, event, arg1, success)
     elseif event == "PLAYER_EQUIPMENT_CHANGED" or event == "UNIT_INVENTORY_CHANGED" then
         if event == "UNIT_INVENTORY_CHANGED" and arg1 ~= "player" then return end
         FW.equipmentRevision = (FW.equipmentRevision or 0) + 1
+        if FW.InvalidateRecentItemReads then FW:InvalidateRecentItemReads() end
         if FW.InvalidateUpgradeComparisons then FW:InvalidateUpgradeComparisons() end
         FW:RefreshTooltips()
     elseif event == "PLAYER_LEVEL_UP" then
         FW:InvalidateCache()
     else
-        if FW.PendingItems then FW.PendingItems[arg1] = nil end
-        if success == false then return end
-        if FW.OnItemDataLoaded then FW:OnItemDataLoaded(arg1, success) end
+        -- Cached native queries can emit these events too. Only an awaited
+        -- completion can change our data; otherwise this feeds bag redraws.
+        local changed = FW.OnItemDataLoaded and FW:OnItemDataLoaded(arg1, success)
+        if not changed then return end
         if FW.InvalidateUpgradeComparisons then FW:InvalidateUpgradeComparisons() end
+        if FW.RefreshUpgradeIndicators then FW:RefreshUpgradeIndicators() end
         -- Only refresh a hovered loading item. Do not redraw on each unrelated
         -- item load; scanner APIs may themselves trigger data events.
         local hovered = FW:GetHoveredItemLink()
         local id = hovered and tonumber(hovered:match("item:(%d+)"))
         local relevant = id and id == arg1
         if hovered and not relevant and GetInventoryItemLink then
-            for slot = 1, 19 do
+            for slot = INVSLOT_AMMO or 0, 19 do
                 local equipped = GetInventoryItemLink("player", slot)
                 if equipped and tonumber(equipped:match("item:(%d+)")) == arg1 then
                     relevant = true; break

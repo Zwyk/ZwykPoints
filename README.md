@@ -1,4 +1,4 @@
-# ZwykValues 0.1.12
+# ZwykValues 0.1.13
 
 A standalone stat-weight addon written from scratch for WoW Forever. No Pawn code, Pawn dependency, third-party libraries, or online item database is required.
 
@@ -106,6 +106,8 @@ An arrow means the item scores higher than an equipped replacement under the mai
 
 Bag/roll arrows refresh after item data loads, equipment changes (including enchants), bag changes, and profile/option edits. They clear when an icon is reused or a roll ends. Chat arrows are a snapshot when each message arrives: an uncached item link requests data and stays unmarked in that message; later messages can show its arrow once the data is available. Existing chat history is retained as originally displayed.
 
+Version 0.1.13 fixes repeated hover work: only item-data completions the addon is waiting for invalidate comparisons and refresh icons; unrelated, duplicate and failed notifications do not redraw all bags. A refresh checks each icon once. Partial reads and subtotals share a bounded, unsaved one-second cache across profiles, Full/Base rows and equipped comparisons, and temporary loading decisions retry after expiry. Completed requests, equipment/enchant changes and cache clearing invalidate those reads immediately. Definitive exclusions reuse a false upgrade decision. Automatic metadata retries are throttled; explicit diagnostic refreshes remain available. These caches reduce repeated scans without turning incomplete data into permanently saved scores.
+
 Native Blizzard bags and loot-roll windows are supported. BetterBags 0.5.14 is also supported automatically, including its bank and list-row item icons; it uses the same **Bags** checkbox and main profile, with no additional provider selection. Its arrows update when equipment, profiles or item data change, and clear when a slot is reused. Empty slots and item-browser previews are excluded.
 
 Other third-party bag addons can integrate their buttons explicitly with `ZwykValues:RegisterUpgradeItemButton(button, linkProvider)` and re-register after their own slot updates; `linkProvider(button)` must return the current full item link or nil.
@@ -161,6 +163,7 @@ lua tests/test_ui.lua
 lua tests/test_upgrades.lua
 lua tests/test_indicators.lua
 lua tests/test_betterbags.lua
+lua tests/test_hover_performance.lua
 ```
 
 `luatex --luaonly` can also run the tests when a standalone Lua executable is unavailable. Production modules use Lua 5.1-compatible syntax.

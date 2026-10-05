@@ -1,5 +1,72 @@
 local _, FW = ...
 local MAX_ITEMS, PARSER_VERSION = 2000, 5
+local recentItems, recentCount, recentCache, recentEquipment = {}, 0, nil, nil
+local metadataRetries = setmetatable({}, {__mode="k"})
+local dataWaits = {}
+
+-- Partial/excluded reads are reusable briefly, but never SavedVariables data.
+-- Native tooltips can gain stats without an explicit item-load request.
+function FW:InvalidateRecentItemReads(itemID)
+    if itemID then
+        for key, entry in pairs(recentItems) do
+            if entry.record.itemID == itemID then
+                metadataRetries[entry.record] = nil
+                recentItems[key], recentCount = nil, recentCount - 1
+            end
+        end
+        for record in pairs(metadataRetries) do
+            if record.itemID == itemID then metadataRetries[record] = nil end
+        end
+    else
+        recentItems, recentCount = {}, 0
+        metadataRetries = setmetatable({}, {__mode="k"})
+        dataWaits = {}
+    end
+end
+
+function FW:GetRecentItemRead(key)
+    if recentCache ~= self.DB.cache or recentEquipment ~= self.equipmentRevision then
+        self:InvalidateRecentItemReads()
+        recentCache, recentEquipment = self.DB.cache, self.equipmentRevision
+    end
+    local now = GetTime and GetTime()
+    local entry = now and recentItems[key]
+    if entry and entry.expires > now then return entry end
+end
+
+function FW:RememberItemRead(record)
+    local now = GetTime and GetTime()
+    if not now then return end
+    self:GetRecentItemRead(record.key)
+    if not recentItems[record.key] then
+        if recentCount >= MAX_ITEMS then recentItems, recentCount = {}, 0 end
+        recentCount = recentCount + 1
+    end
+    local entry = {record=record, expires=now+1, scores={}}
+    recentItems[record.key] = entry
+    return entry
+end
+
+function FW:AwaitItemData(link)
+    local id = type(link) == "string" and tonumber(link:match("item:(%d+)"))
+    if id then
+        if self.PendingItems and self.PendingItems[id] then return false end
+        local now = GetTime and GetTime()
+        if now and dataWaits[id] and dataWaits[id]+1 > now then return false end
+        dataWaits[id] = now
+        self.PendingItems = self.PendingItems or {}
+        self.PendingItems[id] = true
+        return true
+    end
+end
+
+function FW:OnItemDataLoaded(itemID, success)
+    local pending = self.PendingItems and self.PendingItems[itemID]
+    if self.PendingItems then self.PendingItems[itemID] = nil end
+    if not pending or success == false then return false end
+    self:InvalidateRecentItemReads(itemID)
+    return true
+end
 
 local function number(value)
     if issecretvalue and issecretvalue(value) then return nil end
@@ -337,9 +404,7 @@ local function classRestrictions(details, readable)
 end
 
 local function requestItem(itemID)
-    FW.PendingItems = FW.PendingItems or {}
-    if FW.PendingItems[itemID] then return end
-    FW.PendingItems[itemID] = true
+    if not FW:AwaitItemData("item:" .. itemID) then return end
     if C_Item and C_Item.RequestLoadItemDataByID then pcall(C_Item.RequestLoadItemDataByID, itemID) end
 end
 
@@ -407,8 +472,14 @@ function FW:GetRawItemStats(link)
     return result
 end
 
-function FW:RefreshItemFilterMetadata(record)
+function FW:RefreshItemFilterMetadata(record, automatic)
     if type(record) ~= "table" or type(record.link) ~= "string" then return end
+    if automatic and GetTime then
+        local now, retry = GetTime(), metadataRetries[record]
+        if retry and retry.expires > now and retry.cache == self.DB.cache and
+            retry.equipment == self.equipmentRevision then return end
+        metadataRetries[record] = {expires=now+1, cache=self.DB.cache, equipment=self.equipmentRevision}
+    end
     local diagnostic = record.diagnostic or {}
     local knownEquipLoc = record.equipLoc
     if (issecretvalue and issecretvalue(knownEquipLoc)) or type(knownEquipLoc) ~= "string" then knownEquipLoc = nil end
@@ -434,6 +505,8 @@ function FW:RefreshItemFilterMetadata(record)
             record.allowedClasses, record.classRestrictionsKnown, record.classRestrictionUnknownNames
     end
     record.diagnostic = diagnostic
+    if record.classID == nil or record.subclassID == nil or record.equipLoc == nil or
+        record.classRestrictionsKnown ~= true then self:AwaitItemData(record.link) end
 end
 
 local labels = {
@@ -803,6 +876,8 @@ function FW:GetItem(link)
     self.DB.cache.itemOrder = self.DB.cache.itemOrder or {}
     local cached = self.DB.cache.items[key]
     if cached then return cached end
+    local recent = self:GetRecentItemRead(key)
+    if recent then return recent.record end
     local diagnostic, err = self:GetRawItemStats(link)
     if not diagnostic then return nil, err end
     if not diagnostic.ready then return nil, "Item data is still loading." end
@@ -815,8 +890,8 @@ function FW:GetItem(link)
         name = diagnostic.name, parserVersion = PARSER_VERSION,
         diagnostic = self.CopyItemDiagnostic and self:CopyItemDiagnostic(diagnostic) or diagnostic }
     local gear, gearError = self:IsGearItem(record)
-    if gear == false then return record end
-    if gear == nil then return nil, gearError end
+    if gear == false then self:RememberItemRead(record); return record end
+    if gear == nil then self:AwaitItemData(record.link); return nil, gearError end
     for rawKey, rawValue in pairs(diagnostic.raw) do
         if issecretvalue and issecretvalue(rawKey) then rawKey = nil end
         local value = number(rawValue)
@@ -897,6 +972,8 @@ function FW:GetItem(link)
             self.DB.cache.items[removed] = nil
             if self.DB.cache.scores then self.DB.cache.scores[removed] = nil end
         end
+    else
+        self:RememberItemRead(record)
     end
     return record
 end

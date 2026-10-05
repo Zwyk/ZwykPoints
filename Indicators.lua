@@ -65,7 +65,7 @@ local function hookMethod(target, method, callback)
     if ok then methods[method] = true end
 end
 
-local function register(button, provider, option, owner, anchor)
+local function register(button, provider, option, owner, anchor, deferPaint)
     if not usable(button) or type(provider) ~= "function" then return end
     local entry = buttons[button]
     if not entry then
@@ -84,7 +84,7 @@ local function register(button, provider, option, owner, anchor)
         hookMethod(button, "SetBagID", function() hide(entry) end)
     end
     entry.provider, entry.option, entry.owner, entry.anchor = provider, option, owner, anchor
-    paint(button, entry)
+    if not deferPaint then paint(button, entry) end
     return entry
 end
 
@@ -105,11 +105,11 @@ local function bagLink(button)
     end
 end
 
-local function scanContainer(container)
+local function scanContainer(container, deferPaint)
     if not usable(container) or not enabled("upgradeBags") or not visible(container) then return end
     local function visit(button)
         if usable(button) then
-            register(button, bagLink, "upgradeBags", container, button.icon or button.Icon)
+            register(button, bagLink, "upgradeBags", container, button.icon or button.Icon, deferPaint)
         end
     end
     if type(container.EnumerateValidItems) == "function" then
@@ -151,7 +151,7 @@ local function visitNativeContainers(callback)
     for index = 1, NUM_CONTAINER_FRAMES or 13 do visit(_G["ContainerFrame" .. index]) end
 end
 
-local function registerRollFrame(frame)
+local function registerRollFrame(frame, deferPaint)
     if not usable(frame) then return end
     local name = type(frame.GetName) == "function" and frame:GetName()
     local icon = frame.IconFrame or (type(name) == "string" and _G[name .. "IconFrame"])
@@ -161,7 +161,7 @@ local function registerRollFrame(frame)
         local rollID = frame.rollID
         if rollID == nil or (entry and entry.cancelledRollID == rollID) or type(GetLootRollItemLink) ~= "function" then return end
         return GetLootRollItemLink(rollID)
-    end, "upgradeRolls", frame, icon.Icon or icon.icon)
+    end, "upgradeRolls", frame, icon.Icon or icon.icon, deferPaint)
     if entry and not entry.ownerHideHook then
         entry.ownerHideHook = true
         if type(frame.HookScript) == "function" then
@@ -181,8 +181,8 @@ local function installNativeHooks()
     visitNativeContainers(hookContainer)
     hookGlobal("ContainerFrame_Update", function(frame) hookContainer(frame); scanContainer(frame) end)
     hookGlobal("ContainerFrame_GenerateFrame", function(frame) hookContainer(frame); scanContainer(frame) end)
-    hookGlobal("GroupLootFrame_SetupItemDisplay", registerRollFrame)
-    hookGlobal("GroupLootFrame_OnShow", registerRollFrame)
+    hookGlobal("GroupLootFrame_SetupItemDisplay", function(frame) registerRollFrame(frame) end)
+    hookGlobal("GroupLootFrame_OnShow", function(frame) registerRollFrame(frame) end)
     hookGlobal("GroupLootContainer_OpenNewFrame", function() FW:RefreshUpgradeIndicators() end)
     for index = 1, 4 do registerRollFrame(_G["GroupLootFrame" .. index]) end
 end
@@ -203,7 +203,7 @@ local function betterBagsLink(item)
     return link
 end
 
-local function updateBetterBagsItem(_, item, decoration)
+local function updateBetterBagsItem(_, item, decoration, deferPaint)
     local record = betterBagsItems[item]
     if not betterBagsLink(item) or not usable(decoration) then
         if record then record.cleared = true; hide(buttons[record.button]) end
@@ -215,7 +215,7 @@ local function updateBetterBagsItem(_, item, decoration)
     register(decoration, function(button)
         if record.cleared or record.button ~= button then return end
         return betterBagsLink(item)
-    end, "upgradeBags", item.frame, decoration.IconTexture or decoration.icon or decoration.Icon)
+    end, "upgradeBags", item.frame, decoration.IconTexture or decoration.icon or decoration.Icon, deferPaint)
 end
 
 local function clearBetterBagsItem(_, item, decoration)
@@ -225,7 +225,7 @@ local function clearBetterBagsItem(_, item, decoration)
     if buttons[decoration] then hide(buttons[decoration]) end
 end
 
-local function refreshBetterBags()
+local function refreshBetterBags(deferPaint)
     if not LibStub then return end
     local ok, ace = pcall(function() return LibStub("AceAddon-3.0", true) end)
     if not ok or not ace or type(ace.GetAddon) ~= "function" then return end
@@ -268,7 +268,7 @@ local function refreshBetterBags()
         seen[item] = true
         if betterBagsLink(item) and visible(item.frame) then
             local themed, decoration = pcall(themes.GetItemButton, themes, ctx, item)
-            if themed then updateBetterBagsItem(ctx, item, decoration) end
+            if themed then updateBetterBagsItem(ctx, item, decoration, deferPaint) end
         end
     end
     for _, item in pairs(items.buttonsBySlotkey) do visit(item) end
@@ -282,9 +282,11 @@ function FW:RegisterUpgradeItemButton(button, linkProvider)
 end
 
 function FW:RefreshBagUpgradeIndicators()
-    refreshBetterBags()
+    -- Discovery updates live providers first; paint each registered button
+    -- once below. Native update/show hooks keep their immediate decoration.
+    refreshBetterBags(true)
     if enabled("upgradeBags") then
-        visitNativeContainers(function(frame) hookContainer(frame); scanContainer(frame) end)
+        visitNativeContainers(function(frame) hookContainer(frame); scanContainer(frame, true) end)
     end
     for button, entry in pairs(buttons) do
         if entry.option == "upgradeBags" then paint(button, entry) end
@@ -293,7 +295,7 @@ end
 
 function FW:RefreshRollUpgradeIndicators()
     if enabled("upgradeRolls") then
-        for index = 1, 4 do registerRollFrame(_G["GroupLootFrame" .. index]) end
+        for index = 1, 4 do registerRollFrame(_G["GroupLootFrame" .. index], true) end
     end
     for button, entry in pairs(buttons) do
         if entry.option == "upgradeRolls" then paint(button, entry) end
@@ -348,7 +350,9 @@ function FW:InstallUpgradeIndicators()
     for _, event in ipairs({
         "PLAYER_LOGIN", "PLAYER_ENTERING_WORLD", "ADDON_LOADED", "PLAYER_EQUIPMENT_CHANGED", "UNIT_INVENTORY_CHANGED",
         "BAG_UPDATE", "BAG_UPDATE_DELAYED", "BAG_OPEN", "BAG_CLOSED", "BAG_CONTAINER_UPDATE", "USE_COMBINED_BAGS_CHANGED",
-        "START_LOOT_ROLL", "CANCEL_LOOT_ROLL", "CANCEL_ALL_LOOT_ROLLS", "GET_ITEM_INFO_RECEIVED", "ITEM_DATA_LOAD_RESULT",
+        -- Bootstrap coordinates successful pending-item completions. Listening
+        -- independently would redraw all bags for unsolicited cache events.
+        "START_LOOT_ROLL", "CANCEL_LOOT_ROLL", "CANCEL_ALL_LOOT_ROLLS",
     }) do pcall(frame.RegisterEvent, frame, event) end
     installNativeHooks()
     self:RefreshUpgradeIndicators()

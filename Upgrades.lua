@@ -2,6 +2,15 @@ local _, FW = ...
 
 local arrow = "|TInterface\\AddOns\\ZwykValues\\Textures\\ArrowUp:12:12:0:0|t"
 local memo, memoCount, memoSignature = {}, 0, nil
+local function remember(key, value)
+    if memoCount >= (FW.CACHE_LIMIT or 2000) then memo, memoCount = {}, 0 end
+    if memo[key] == nil then memoCount = memoCount + 1 end
+    memo[key] = value
+end
+local function temporaryFalse(key)
+    if GetTime then remember(key, {value=false, expires=GetTime()+1}) end
+    return false
+end
 
 local function safeString(value)
     if issecretvalue and issecretvalue(value) then return nil end
@@ -25,23 +34,25 @@ function FW:IsMainProfileUpgrade(link)
     end
     local key = self.ItemKey and self:ItemKey(link) or link
     if not key then return false end
-    if memo[key] ~= nil then return memo[key] end
+    local cached = memo[key]
+    if type(cached) == "boolean" then return cached end
+    if cached and GetTime and cached.expires > GetTime() then return cached.value end
     local ok, result = pcall(self.CompareItem, self, link, profile)
-    if not ok or not result or result.pending or result.excluded then return false end
+    if not ok or not result or result.pending then return temporaryFalse(key) end
+    if result.excluded then remember(key, false); return false end
     -- A partial subtotal is useful in a tooltip, but cannot establish whether
     -- an item is an upgrade. Do not persist temporary/loading decisions.
     if result.record and ((self.ItemHasIssues and self:ItemHasIssues(result.record, profile))
-        or result.record.partial) then return false end
+        or result.record.partial) then return temporaryFalse(key) end
     local upgrade, complete = false, true
     for _, comparison in ipairs(result.comparisons or {}) do
         if comparison.error or comparison.hasIssues then complete = false
         elseif comparison.status == "upgrade" then upgrade = true end
     end
     if complete or upgrade then
-        if memoCount >= (self.CACHE_LIMIT or 2000) then
-            memo, memoCount = {}, 0
-        end
-        memo[key], memoCount = upgrade, memoCount + 1
+        remember(key, upgrade)
+    else
+        return temporaryFalse(key)
     end
     return upgrade
 end

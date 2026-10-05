@@ -656,7 +656,7 @@ function FW:GetScore(link, profile, ignoreFilters)
     if type(record.key) ~= "string" or type(record.stats) ~= "table" then return nil, "Item data is incomplete." end
     local gear, gearError = self:IsGearItem(record)
     if gear == nil and self.RefreshItemFilterMetadata then
-        self:RefreshItemFilterMetadata(record)
+        self:RefreshItemFilterMetadata(record, true)
         gear, gearError = self:IsGearItem(record)
     end
     if gear == false then return nil, record, "excluded" end
@@ -664,13 +664,16 @@ function FW:GetScore(link, profile, ignoreFilters)
     if not ignoreFilters then
         local allowed, reason = self:IsItemAllowed(record, profile)
         if allowed == nil and self.RefreshItemFilterMetadata then
-            self:RefreshItemFilterMetadata(record)
+            self:RefreshItemFilterMetadata(record, true)
             allowed, reason = self:IsItemAllowed(record, profile)
         end
         if allowed == false then return nil, record, "excluded" end
         if allowed == nil then return nil, reason end
     end
     local cache = self.DB.cache
+    local recent = self.GetRecentItemRead and self:GetRecentItemRead(record.key)
+    local subtotal = recent and recent.record == record and recent.scores[profile.id]
+    if subtotal and subtotal.revision == profile.revision then return subtotal.score, record, subtotal.detail end
     local scores = cache.scores[record.key]
     local cached = type(scores) == "table" and scores[profile.id]
     if not record.partial and type(cached) == "table" and cached.revision == profile.revision and finite(cached.score) then
@@ -716,7 +719,12 @@ function FW:GetScore(link, profile, ignoreFilters)
     -- A partially loaded tooltip may gain more stats on the next read. It must
     -- never become a persistent item/score entry merely because scoring ran.
     if record.partial or scorePartial then
-        return score, record, #scoreWarnings > 0 and table.concat(scoreWarnings, " ") or self:ItemIssueSummary(record, profile)
+        local detail = #scoreWarnings > 0 and table.concat(scoreWarnings, " ") or self:ItemIssueSummary(record, profile)
+        if self.RememberItemRead then
+            recent = recent and recent.record == record and recent or self:RememberItemRead(record)
+            if recent then recent.scores[profile.id] = {revision=profile.revision, score=score, detail=detail} end
+        end
+        return score, record, detail
     end
     scores = type(scores) == "table" and scores or {}
     scores[profile.id] = { revision = profile.revision, score = score }
@@ -750,6 +758,9 @@ function FW:InvalidateItem(link)
         for candidate, record in pairs(self.DB.cache.items) do if record.link == link then key = candidate break end end
     end
     if not key then return false end
+    if self.InvalidateRecentItemReads then
+        self:InvalidateRecentItemReads(type(link) == "string" and tonumber(link:match("item:(%d+)")))
+    end
     local cache = self.DB.cache
     cache.items[key], cache.scores[key] = nil, nil
     if self.InvalidateUpgradeComparisons then self:InvalidateUpgradeComparisons() end
