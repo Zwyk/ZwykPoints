@@ -1,4 +1,4 @@
-# ZwykValues 0.1.6
+# ZwykValues 0.1.7
 
 A standalone stat-weight addon written from scratch for WoW Forever. No Pawn code, Pawn dependency, third-party libraries, or online item database is required.
 
@@ -31,13 +31,19 @@ Each score is a linear sum:
 
 For example, 20 Strength at weight 2 and 1% Crit at weight 10 give 50 points in a percentage profile. Stamina is not converted to health, Strength is not converted to attack power, and Agility is not converted to crit: enter weights that already account for their value for your character.
 
-Profiles are account-wide, including their active status and colors. All changes and the score cache are stored by WoW in the addon's `SavedVariables` on logout or `/reload`.
+Profiles are account-wide, including their active status, colors and item filters. All changes and the score cache are stored by WoW in the addon's `SavedVariables` on logout or `/reload`.
+
+Click **Item filters** in a profile to choose its weapon and armor types independently. The scrollable dialog provides a checkbox for each supported client subtype, including shields, class relics and miscellaneous armor/accessories. All types start checked for both new and existing profiles. Changes save immediately and apply to the profile's full/base tooltip values and its main-profile upgrade arrows.
+
+Uncheck **Include items restricted to other classes** to exclude items whose explicit **Classes** restriction does not include your current character's class. An item allowing several classes remains included when yours is among them. This setting uses the current character, so a shared profile adapts when you log into another class. If required type or restriction metadata cannot be read, values wait for that data rather than assuming eligibility. Unchecked candidate items show no values for that profile; equipped comparison baselines still retain their complete score.
+
+Copies and full profile exports preserve these choices. Bare weights JSON and older profiles without item filters start with every filter enabled.
 
 ## Stat units and JSON
 
 The supplied Sixty Upgrades keys are preserved. **Import** accepts a bare JSON object of stat weights. Missing recognized keys become zero. Unknown keys and invalid numeric values are rejected with a message so typos cannot silently change a profile.
 
-**Export weights** produces the bare stat object. **Export profile** also preserves the profile name, color, and secondary-stat unit. These metadata are lost when exporting only bare weights.
+**Export weights** produces the bare stat object. **Export profile** also preserves the profile name, color, secondary-stat unit and item filters. These metadata are lost when exporting only bare weights.
 
 Choose the unit explicitly:
 
@@ -96,7 +102,7 @@ Bag/roll arrows refresh after item data loads, equipment changes (including ench
 
 Native Blizzard bags and loot-roll windows are supported. Third-party bag addons can integrate their buttons explicitly with `ZwykValues:RegisterUpgradeItemButton(button, linkProvider)` and re-register after their own slot updates; `linkProvider(button)` must return the current full item link or nil.
 
-After upgrading to 0.1.4, parser-versioned cache keys automatically refresh item stats and scores. Issue exports intentionally preserve historical problems: use `/zv clearissues`, then hover the items again to collect a report for the new parser.
+After upgrading to 0.1.7, parser-versioned cache keys automatically refresh item stats, type metadata and scores. Issue exports intentionally preserve historical problems: use `/zv clearissues`, then hover the items again to collect a report for the new parser.
 
 ## Debugging unrecognized stats
 
@@ -138,6 +144,8 @@ lua tests/test_core.lua
 lua tests/test_items.lua
 lua tests/test_compare.lua
 lua tests/test_base.lua
+lua tests/test_filters.lua
+lua tests/test_item_metadata.lua
 lua tests/test_tooltips.lua
 lua tests/test_bootstrap.lua
 lua tests/test_integration.lua

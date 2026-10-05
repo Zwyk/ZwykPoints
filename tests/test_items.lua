@@ -324,7 +324,7 @@ for _, sample in ipairs(foreverCases) do
     equal(next(item.unresolvedStats), nil)
     equal(FW:GetIssueReport().itemCount, 0)
     equal(FW:GetItem("item:" .. sample.id .. ":8481"), item, "resolved item caches")
-    equal(item.parserVersion, 3, "old persisted parser results receive a new key")
+    equal(item.parserVersion, 4, "old persisted parser results receive a new key")
 end
 
 FW = newReader({ raw = { RESISTANCE0_NAME = 141, ITEM_MOD_STAMINA_SHORT = 4 },

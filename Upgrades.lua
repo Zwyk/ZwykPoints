@@ -27,7 +27,7 @@ function FW:IsMainProfileUpgrade(link)
     if not key then return false end
     if memo[key] ~= nil then return memo[key] end
     local ok, result = pcall(self.CompareItem, self, link, profile)
-    if not ok or not result or result.pending then return false end
+    if not ok or not result or result.pending or result.excluded then return false end
     -- A partial subtotal is useful in a tooltip, but cannot establish whether
     -- an item is an upgrade. Do not persist temporary/loading decisions.
     if result.record and ((self.ItemHasIssues and self:ItemHasIssues(result.record, profile))

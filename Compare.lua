@@ -40,8 +40,11 @@ end
 -- combined main/off-hand score; a shield cannot be compared to an occupied 2H slot.
 function FW:CompareItem(link, profile, baseOnly)
     local getScore = baseOnly and self.GetBaseScore or self.GetScore
-    local score, record = getScore(self, link, profile)
-    if score == nil then return nil, record end
+    local score, record, detail = getScore(self, link, profile)
+    if score == nil then
+        if detail == "excluded" then return {excluded=true, record=record, comparisons={}} end
+        return nil, record
+    end
     local result = {score=score, record=record, comparisons={}}
     result.hasIssues = (self.ItemHasIssues and self:ItemHasIssues(record, profile)) or record.partial
     local equipLoc = record.equipLoc
@@ -79,7 +82,7 @@ function FW:CompareItem(link, profile, baseOnly)
             local equipped = inventoryLink(slot)
             if equipped then
                 comparison.links[#comparison.links+1] = equipped
-                local equippedScore, equippedRecord = getScore(self, equipped, profile)
+                local equippedScore, equippedRecord = getScore(self, equipped, profile, true)
                 if equippedScore == nil then comparison.error = tostring(equippedRecord); break end
                 if (self.ItemHasIssues and self:ItemHasIssues(equippedRecord, profile)) or equippedRecord.partial then
                     comparison.hasIssues, result.hasIssues = true, true

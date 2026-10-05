@@ -186,9 +186,7 @@ function FW:DecorateTooltip(tooltip, data)
     end
     local compare = not equipped and not comparisonTooltip(tooltip) and
         not (self.DB.options and self.DB.options.showComparisons == false)
-    if #profiles > 0 then
-        tooltip:AddLine(" ")
-    end
+    local displayedProfiles, addedSpacer = 0, false
     for _, profile in ipairs(profiles) do
         local r, g, b = profile.color.r, profile.color.g, profile.color.b
         local function readResult(base)
@@ -196,13 +194,17 @@ function FW:DecorateTooltip(tooltip, data)
                 if base then return self:CompareBaseItem(link, profile) end
                 return self:CompareItem(link, profile)
             end
-            local score, record
-            if base then score, record = self:GetBaseScore(link, profile)
-            else score, record = self:GetScore(link, profile) end
+            local score, record, detail
+            if base then score, record, detail = self:GetBaseScore(link, profile)
+            else score, record, detail = self:GetScore(link, profile) end
             if score ~= nil then return {score=score, record=record, comparisons={}} end
+            if detail == "excluded" then return {excluded=true,record=record,comparisons={}} end
             return nil, record
         end
         local function addResult(result, errorMessage, base)
+            if result and result.excluded then return end
+            if not addedSpacer then tooltip:AddLine(" "); addedSpacer = true end
+            if not base then displayedProfiles = displayedProfiles + 1 end
             local label = base and "  Base" or profile.name
             if result then
                 local comparisons = {}
@@ -223,13 +225,13 @@ function FW:DecorateTooltip(tooltip, data)
         end
         local result, errorMessage = readResult(false)
         addResult(result, errorMessage, false)
-        if self.GetBaseScore and self.CompareBaseItem then
+        if not (result and result.excluded) and self.GetBaseScore and self.CompareBaseItem then
             result, errorMessage = readResult(true)
             addResult(result, errorMessage, true)
         end
     end
     for note in pairs(notes) do tooltip:AddLine("  " .. note, .75,.75,.75, true) end
-    if issues then
+    if issues and (displayedProfiles > 0 or #profiles == 0) then
         tooltip:AddLine("Partial stat data; /zv inspect or /zv exportissues.", 1,.7,.25, true)
     end
     decorating = false

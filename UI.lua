@@ -3,6 +3,7 @@ local _, FW = ...
 -- The editor is created once, then refreshed in place. Unapplied weights stay in
 -- the editor while cache updates or profile visibility changes refresh the UI.
 local UI
+local refreshItemFilters
 local ROW_HEIGHT = 30
 local unpack = unpack or table.unpack
 local finite = function(value)
@@ -182,6 +183,7 @@ local function refreshEditor(force)
     UI.weightState:SetText(UI.dirtyWeights and "Unsaved weights" or "Weights saved")
     UI.weightState:SetTextColor(UI.dirtyWeights and 1 or 0.6, UI.dirtyWeights and 0.78 or 0.72, UI.dirtyWeights and 0.35 or 0.64)
     UI.loading = false
+    if refreshItemFilters then refreshItemFilters(profile) end
 end
 
 local function commit(changes, clearDraft, success)
@@ -380,6 +382,7 @@ local function createJSONDialog()
 end
 
 local function showJSON(mode)
+    if UI.filterDialog then UI.filterDialog:Hide() end
     if not UI.dialog then createJSONDialog() end
     local dialog = UI.dialog
     dialog.text:SetMaxLetters(131072)
@@ -400,8 +403,8 @@ local function showJSON(mode)
         if not text then status(err or "Could not export this profile.", "error") return end
         dialog.title:SetText(mode == "weights" and "Export weights only" or "Export a weight profile")
         dialog.help:SetText(mode == "weights"
-            and "Sixty Upgrades compatible keys. The weights-only JSON does not include this profile's name, color, visibility or unit. Press Ctrl+C to copy."
-            or "Includes all weights, name, color and stat units. Press Ctrl+C to copy this profile, then import it on another character or account.")
+            and "Sixty Upgrades compatible keys. The weights-only JSON does not include this profile's name, color, visibility, unit or item filters. Press Ctrl+C to copy."
+            or "Includes all weights, name, color, stat units and item filters. Press Ctrl+C to copy this profile, then import it on another character or account.")
         dialog.nameLabel:Hide()
         dialog.name:Hide()
         dialog.import:Hide()
@@ -411,6 +414,108 @@ local function showJSON(mode)
     dialog.scroll:SetVerticalScroll(0)
     dialog.text:SetFocus()
     if mode ~= "import" then dialog.text:HighlightText() end
+end
+
+local function itemTypeLabel(group, definition)
+    local classID = group.classID or (group.key == "weapons" and 2 or group.key == "armor" and 4)
+    local subClassID = tonumber(definition.key)
+    local getter = C_Item and C_Item.GetItemSubClassInfo or GetItemSubClassInfo
+    if getter and classID and subClassID then
+        local ok, localized = pcall(getter, classID, subClassID)
+        if ok and type(localized) == "string" and localized ~= "" then return localized end
+    end
+    return definition.label or tostring(definition.key)
+end
+
+refreshItemFilters = function(profile)
+    if not UI or not UI.filterDialog then return end
+    local dialog = UI.filterDialog
+    local enabled = profile ~= nil
+    local filters = profile and profile.itemFilters or {}
+    dialog.title:SetText(profile and ("Item filters for " .. profile.name) or "Choose a profile to set item filters")
+    setEnabled(dialog.otherClasses, enabled)
+    dialog.otherClasses:SetChecked(enabled and filters.includeOtherClasses ~= false)
+    for _, control in ipairs(dialog.types) do
+        local included = type(filters[control.filterGroup]) ~= "table" or filters[control.filterGroup][control.filterKey] ~= false
+        setEnabled(control, enabled)
+        control:SetChecked(enabled and included)
+    end
+end
+
+local function showItemFilters()
+    if not selectedProfile() then return end
+    if UI.dialog then UI.dialog:Hide() end
+    if not UI.filterDialog then
+        local dialog = panel(UI.frame)
+        UI.filterDialog = dialog
+        dialog:SetSize(560, 500)
+        dialog:SetPoint("CENTER")
+        dialog:SetFrameStrata("DIALOG")
+        dialog:SetFrameLevel(UI.frame:GetFrameLevel() + 20)
+        dialog:EnableMouse(true)
+        backdrop(dialog, { 0.055, 0.065, 0.09, 1 })
+        dialog.title = label(dialog, "", 17, { 1, 0.82, 0 })
+        dialog.title:SetPoint("TOPLEFT", 18, -17)
+        dialog.title:SetPoint("TOPRIGHT", -18, -17)
+        dialog.title:SetHeight(23)
+        dialog.title:SetWordWrap(false)
+        dialog.help = label(dialog, "Choose the item types this profile evaluates. Changes save immediately; your unsaved weights stay in the editor.", 11, { 0.79, 0.84, 0.91 })
+        dialog.help:SetPoint("TOPLEFT", 18, -49)
+        dialog.help:SetPoint("TOPRIGHT", -18, -49)
+        dialog.help:SetHeight(31)
+        dialog.help:SetJustifyV("TOP")
+        dialog.otherClasses = CreateFrame("CheckButton", nil, dialog, "UICheckButtonTemplate")
+        dialog.otherClasses:SetSize(25, 25)
+        dialog.otherClasses:SetPoint("TOPLEFT", 13, -90)
+        label(dialog.otherClasses, "Include items restricted to other classes", 11, { 0.88, 0.91, 0.96 }):SetPoint("LEFT", dialog.otherClasses, "RIGHT", 1, 0)
+        dialog.otherClasses:SetScript("OnClick", function(self)
+            commit({ itemFilters = { includeOtherClasses = self:GetChecked() and true or false } }, nil, "Class restriction filter saved.")
+        end)
+        hint(dialog.otherClasses, "Items restricted to other classes", "Include items whose Classes restriction excludes your current class. Uncheck to exclude them for this profile. The weapon and armor type filters still apply.")
+        local inset = panel(dialog)
+        inset:SetPoint("TOPLEFT", 16, -130)
+        inset:SetPoint("BOTTOMRIGHT", -16, 52)
+        dialog.scroll = CreateFrame("ScrollFrame", "ZwykValuesItemFiltersScroll", inset, "UIPanelScrollFrameTemplate")
+        dialog.scroll:SetPoint("TOPLEFT", 8, -8)
+        dialog.scroll:SetPoint("BOTTOMRIGHT", -29, 8)
+        dialog.content = CreateFrame("Frame", nil, dialog.scroll)
+        dialog.content:SetWidth(491)
+        dialog.scroll:SetScrollChild(dialog.content)
+        dialog.types = {}
+        local y, columnWidth = 2, 245
+        for _, group in ipairs(FW.ItemFilterGroups or {}) do
+            local heading = label(dialog.content, group.label, 12, { 1, 0.82, 0.35 })
+            heading:SetPoint("TOPLEFT", 4, -y)
+            heading:SetWidth(480)
+            heading:SetHeight(20)
+            y = y + 25
+            for index, definition in ipairs(group.types or {}) do
+                local groupKey, typeKey = group.key, tostring(definition.key)
+                local text = itemTypeLabel(group, definition)
+                local control = CreateFrame("CheckButton", nil, dialog.content, "UICheckButtonTemplate")
+                control:SetSize(23, 23)
+                control:SetPoint("TOPLEFT", ((index - 1) % 2) * columnWidth, -(y + math.floor((index - 1) / 2) * 27))
+                control.filterGroup, control.filterKey = groupKey, typeKey
+                local name = label(control, text, 11, { 0.88, 0.91, 0.96 })
+                name:SetPoint("LEFT", control, "RIGHT", 2, 0)
+                name:SetWidth(columnWidth - 28)
+                name:SetHeight(23)
+                name:SetWordWrap(false)
+                control:SetScript("OnClick", function(self)
+                    commit({ itemFilters = { [groupKey] = { [typeKey] = self:GetChecked() and true or false } } }, nil, text .. " filter saved.")
+                end)
+                hint(control, text, "Include this item type in scores and upgrade comparisons for the selected profile. Uncheck to exclude it. Changes save immediately.")
+                dialog.types[#dialog.types + 1] = control
+            end
+            y = y + math.ceil(#(group.types or {}) / 2) * 27 + 13
+        end
+        dialog.content:SetHeight(math.max(y, dialog.scroll:GetHeight()))
+        local done = button(dialog, "Done", 90, function() dialog:Hide() end)
+        done:SetPoint("BOTTOMRIGHT", -18, 13)
+    end
+    refreshItemFilters(selectedProfile())
+    UI.filterDialog.scroll:SetVerticalScroll(0)
+    UI.filterDialog:Show()
 end
 
 local statHints = {
@@ -716,6 +821,9 @@ local function createUI()
     end
     UI.percent = unitButton("Percent / skill", 132, "percent")
     UI.rating = unitButton("Rating", 276, "rating")
+    UI.itemFilters = button(UI.right, "Item filters", 100, showItemFilters)
+    UI.itemFilters:SetPoint("TOPRIGHT", -15, -98)
+    hint(UI.itemFilters, "Item filters for this profile", "Choose weapon types, armor types, and whether to include items restricted to other classes. These settings are separate for each profile and save immediately.")
     UI.unitHelp = label(UI.right, "", 10, { 0.65, 0.74, 0.85 })
     UI.unitHelp:SetPoint("TOPLEFT", 15, -129)
     UI.unitHelp:SetPoint("TOPRIGHT", -15, -129)
@@ -741,9 +849,9 @@ local function createUI()
     UI.export:SetPoint("RIGHT", UI.import, "LEFT", -6, 0)
     UI.exportWeights = button(UI.right, "Weights JSON", 104, function() showJSON("weights") end)
     UI.exportWeights:SetPoint("RIGHT", UI.export, "LEFT", -6, 0)
-    hint(UI.export, "Export profile", "Exports the saved profile with its name, color and units. Apply edited weights before exporting.")
-    hint(UI.exportWeights, "Export weights", "Exports the saved weights using Sixty Upgrades keys. Name, color and unit metadata are omitted.")
-    UI.profileControls = { UI.name, UI.rename, UI.active, UI.main, UI.color, UI.colorButton, UI.percent, UI.rating, UI.apply }
+    hint(UI.export, "Export profile", "Exports the saved profile with its name, color, units and item filters. Apply edited weights before exporting.")
+    hint(UI.exportWeights, "Export weights", "Exports the saved weights using Sixty Upgrades keys. Name, color, unit and item filter metadata are omitted.")
+    UI.profileControls = { UI.name, UI.rename, UI.active, UI.main, UI.color, UI.colorButton, UI.percent, UI.rating, UI.itemFilters, UI.apply }
     buildWeightFields()
 
     local note = label(frame, "Fixed weights ignore caps, procs, sets and rotations.", 10, { 0.66, 0.71, 0.79 })
@@ -789,6 +897,7 @@ local function createUI()
     end)
     frame:SetScript("OnHide", function()
         if UI.dialog then UI.dialog:Hide() end
+        if UI.filterDialog then UI.filterDialog:Hide() end
         UI.name:ClearFocus()
         UI.color:ClearFocus()
         for _, field in ipairs(UI.fields) do field.box:ClearFocus() end
@@ -862,6 +971,7 @@ end
 
 function FW:ShowTextDialog(title, text, importMode)
     if not UI then createUI() end
+    if UI.filterDialog then UI.filterDialog:Hide() end
     UI.frame:Show()
     if importMode then
         showJSON("import")

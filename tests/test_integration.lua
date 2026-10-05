@@ -11,6 +11,9 @@ local itemDB={
     ["item:104:0:0:0:0:0:0:0:60"]={name="Base new helmet",strength=10,crit=1,equipLoc="INVTYPE_HEAD"},
     ["item:105:8481:0:0:0:0:0:0:60"]={name="Enchanted old helmet",strength=8,crit=1,equipLoc="INVTYPE_HEAD",enchant=10},
     ["item:105:0:0:0:0:0:0:0:60"]={name="Base old helmet",strength=8,crit=1,equipLoc="INVTYPE_HEAD"},
+    ["item:106:0:0:0:0:0:0:0:60"]={name="Cloth helmet",strength=20,crit=1,equipLoc="INVTYPE_HEAD",subclassID=1},
+    ["item:107:0:0:0:0:0:0:0:60"]={name="Warrior helmet",strength=20,crit=1,equipLoc="INVTYPE_HEAD",classes="Warrior"},
+    ["item:108:0:0:0:0:0:0:0:60"]={name="Shared helmet",strength=20,crit=1,equipLoc="INVTYPE_HEAD",classes="Warrior, Paladin"},
 }
 local candidate="item:100:0:0:0:0:0:0:0:60"
 local baseline="item:101:0:0:0:0:0:0:0:60"
@@ -25,16 +28,18 @@ local function sourceLines(link)
         "Equip: Increases your chance to get a critical strike by " .. item.crit .. "%."}
     if item.unknown then lines[#lines+1]="+" .. item.unknown .. " Mystic Focus" end
     if item.enchant then lines[#lines+1]="Enchanted: Strength +" .. item.enchant end
+    if item.classes then lines[#lines+1]="Classes: " .. item.classes end
     return lines
 end
 GetBuildInfo=function() return "16.0.0","65000","Oct 1 2026",160000 end
 GetLocale=function() return "enUS" end
 local level=60
 UnitLevel=function() return level end
+UnitClass=function() return "Paladin","PALADIN" end
 GetInventoryItemLink=function(_,slot) if slot==1 then return baseline end end
 GetItemInfo=function(link)
     local item=definition(link)
-    return item.name,link,3,60,60,"Armor","Plate",1,item.equipLoc
+    return item.name,link,3,60,60,"Armor","Plate",1,item.equipLoc,nil,nil,4,item.subclassID or 4
 end
 C_Item={
     GetItemInfo=GetItemInfo,
@@ -97,7 +102,7 @@ CreateFrame=function(kind,name)
     assert(kind=="GameTooltip" and name=="ZwykValuesScanTooltip")
     local scanner=frame(name);_G[name]=scanner;return scanner
 end
-for _,file in ipairs({"JSON.lua","Stats.lua","Core.lua","Items.lua","Compare.lua","Tooltips.lua"}) do
+for _,file in ipairs({"JSON.lua","Stats.lua","Core.lua","Items.lua","Compare.lua","Upgrades.lua","Tooltips.lua"}) do
     assert(loadfile(file))("ZwykValues",FW)
 end
 local actualScoreStats=FW.ScoreStats
@@ -176,6 +181,35 @@ C_TooltipInfo=nil
 assert(FW:GetScore(scanned,one)==22)
 assert(FW.ScanTooltip and not FW.ScanTooltip.fwHooked and not FW.ScanTooltip.fwSignature)
 assert(FW.ScanTooltip:NumLines()==3 and not FW.ScanTooltip:IsShown())
+
+-- Actual client metadata -> profile filters -> full/base tooltip and upgrade
+-- decisions. The same item can be hidden for one profile and shown for another.
+C_TooltipInfo={GetHyperlink=function(link)
+    local lines={}
+    for _,text in ipairs(sourceLines(link)) do lines[#lines+1]={leftText=text} end
+    return {lines=lines}
+end}
+assert(FW:UpdateProfile(one.id,{itemFilters={armor={["1"]=false},includeOtherClasses=false}}))
+assert(FW:SetMainProfile(one.id))
+local cloth="item:106:0:0:0:0:0:0:0:60"
+GameTooltip:SetHyperlink(cloth)
+assert(not findLine("Melee") and findLine("Caster") and findLine("  Base").right:find("5.00",1,true))
+assert(not FW:IsMainProfileUpgrade(cloth))
+local warriorItem="item:107:0:0:0:0:0:0:0:60"
+GameTooltip:SetHyperlink(warriorItem)
+assert(not findLine("Melee") and findLine("Caster"))
+assert(not FW:IsMainProfileUpgrade(warriorItem))
+local shared="item:108:0:0:0:0:0:0:0:60"
+GameTooltip:SetHyperlink(shared)
+assert(findLine("Melee").right:find("70.00",1,true) and FW:IsMainProfileUpgrade(shared))
+-- Switch the current player's class without discarding numeric score caches.
+UnitClass=function() return "Warrior","WARRIOR" end
+GameTooltip:SetHyperlink(warriorItem)
+assert(findLine("Melee").right:find("70.00",1,true))
+UnitClass=function() return "Paladin","PALADIN" end
+assert(FW:UpdateProfile(one.id,{itemFilters={armor={["1"]=true},includeOtherClasses=true}}))
+GameTooltip:SetHyperlink(cloth)
+assert(findLine("Melee").right:find("70.00",1,true) and FW:IsMainProfileUpgrade(cloth))
 
 -- SavedVariables reused by a fresh addon namespace keep valid item totals.
 local persisted=ZwykValuesDB

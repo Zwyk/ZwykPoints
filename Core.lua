@@ -7,6 +7,28 @@ FW.SecondaryStatKeys = secondaryKeys
 local upgradeOptions = { upgradeBags = true, upgradeRolls = true, upgradeChat = true }
 local defaultColor = { r = 0.35, g = 0.8, b = 1 }
 
+-- Stable client subclass IDs keep saved filters independent of locale.
+FW.ItemFilterGroups = {
+    {key="weapons", label="Weapon types", classID=2, types={
+        {key="0",label="One-handed axes"}, {key="1",label="Two-handed axes"},
+        {key="2",label="Bows"}, {key="3",label="Guns"},
+        {key="4",label="One-handed maces"}, {key="5",label="Two-handed maces"},
+        {key="6",label="Polearms"}, {key="7",label="One-handed swords"},
+        {key="8",label="Two-handed swords"}, {key="9",label="Warglaives"},
+        {key="10",label="Staves"}, {key="13",label="Fist weapons"},
+        {key="14",label="Other weapons"}, {key="15",label="Daggers"},
+        {key="16",label="Thrown weapons"}, {key="18",label="Crossbows"},
+        {key="19",label="Wands"}, {key="20",label="Fishing poles"},
+    }},
+    {key="armor", label="Armor types", classID=4, types={
+        {key="0",label="Miscellaneous armor / accessories"}, {key="1",label="Cloth"},
+        {key="2",label="Leather"}, {key="3",label="Mail"}, {key="4",label="Plate"},
+        {key="5",label="Cosmetic armor"}, {key="6",label="Shields"},
+        {key="7",label="Librams"}, {key="8",label="Idols"}, {key="9",label="Totems"},
+        {key="10",label="Sigils"}, {key="11",label="Relics"},
+    }},
+}
+
 local function finite(value)
     return type(value) == "number" and value == value and value ~= math.huge and value ~= -math.huge
 end
@@ -16,6 +38,84 @@ local function plainObject(value)
     local meta = getmetatable(value)
     if meta and meta.__jsonType and meta.__jsonType ~= "object" then return false end
     for key in pairs(value) do if type(key) ~= "string" then return false end end
+    return true
+end
+
+local function cloneItemFilters(source)
+    source = type(source) == "table" and source or {}
+    local result = {includeOtherClasses=source.includeOtherClasses ~= false}
+    for _, group in ipairs(FW.ItemFilterGroups) do
+        local values = type(source[group.key]) == "table" and source[group.key] or {}
+        result[group.key] = {}
+        for _, itemType in ipairs(group.types) do
+            result[group.key][itemType.key] = values[itemType.key] ~= false
+        end
+    end
+    return result
+end
+
+local function validItemFilters(changes, current)
+    if not plainObject(changes) then return nil, "Item filters must be a JSON object." end
+    local result = cloneItemFilters(current)
+    local groups = {}
+    for _, group in ipairs(FW.ItemFilterGroups) do groups[group.key] = group end
+    for key, value in pairs(changes) do
+        if key == "includeOtherClasses" then
+            if type(value) ~= "boolean" then return nil, "Include other classes must be true or false." end
+            result[key] = value
+        elseif groups[key] then
+            if not plainObject(value) then return nil, "Filter types must be a JSON object." end
+            for typeKey, checked in pairs(value) do
+                if result[key][typeKey] == nil then return nil, "Unknown " .. key .. " type '" .. typeKey .. "'." end
+                if type(checked) ~= "boolean" then return nil, "Item type filters must be true or false." end
+                result[key][typeKey] = checked
+            end
+        else
+            return nil, "Unknown item filter '" .. key .. "'."
+        end
+    end
+    return result
+end
+
+local function itemFiltersEqual(left, right)
+    if left.includeOtherClasses ~= right.includeOtherClasses then return false end
+    for _, group in ipairs(FW.ItemFilterGroups) do
+        for _, itemType in ipairs(group.types) do
+            if left[group.key][itemType.key] ~= right[group.key][itemType.key] then return false end
+        end
+    end
+    return true
+end
+
+function FW:IsItemAllowed(record, profile)
+    local filters = profile.itemFilters
+    if not filters then return true end
+    local function hasExclusions(group)
+        for _, checked in pairs(group or {}) do if checked == false then return true end end
+        return false
+    end
+    local group = record.classID == 2 and filters.weapons or record.classID == 4 and filters.armor
+    if record.classID == nil and (hasExclusions(filters.weapons) or hasExclusions(filters.armor)) then
+        return nil, "Item type data is not available yet."
+    end
+    if group then
+        if record.subclassID == nil and hasExclusions(group) then
+            return nil, "Item subtype data is not available yet."
+        end
+        if group[tostring(record.subclassID)] == false then return false end
+    end
+    if filters.includeOtherClasses == false then
+        local allowed = record.allowedClasses
+        if allowed then
+            local _, playerClass
+            if UnitClass then _, playerClass = UnitClass("player") end
+            if issecretvalue and issecretvalue(playerClass) then playerClass = nil end
+            if playerClass and allowed[playerClass] then return true end
+            if not playerClass then return nil, "Player class data is not available yet." end
+            if record.classRestrictionsKnown then return false end
+        elseif record.classRestrictionsKnown then return true end
+        return nil, "Item class restrictions could not be read yet."
+    end
     return true
 end
 
@@ -149,6 +249,7 @@ function FW:Initialize()
         profile.active = profile.active ~= false
         profile.color = validColor(profile.color) or { r = defaultColor.r, g = defaultColor.g, b = defaultColor.b }
         profile.secondaryUnit = validUnit(profile.secondaryUnit) or "percent"
+        profile.itemFilters = cloneItemFilters(profile.itemFilters)
         profile.revision = finite(profile.revision) and math.max(1, math.floor(profile.revision)) or 1
         normalized[#normalized + 1], seen[id] = id, true
     end
@@ -241,7 +342,7 @@ function FW:CreateProfile(name, weights)
     local profile = {
         id = id, name = checkedName, active = true,
         color = { r = defaultColor.r, g = defaultColor.g, b = defaultColor.b },
-        weights = checkedWeights, revision = 1, secondaryUnit = "percent",
+        weights = checkedWeights, revision = 1, secondaryUnit = "percent", itemFilters = cloneItemFilters(),
     }
     db.profiles[id] = profile
     db.profileOrder[#db.profileOrder + 1] = id
@@ -269,7 +370,7 @@ function FW:UpdateProfile(id, changes)
     local profile = self.DB.profiles[id]
     if not profile then return nil, "Profile not found." end
     if not plainObject(changes) then return nil, "Profile changes must be a table." end
-    local allowed = { name = true, active = true, color = true, weights = true, secondaryUnit = true }
+    local allowed = { name = true, active = true, color = true, weights = true, secondaryUnit = true, itemFilters = true }
     for key in pairs(changes) do if not allowed[key] then return nil, "Unknown profile field '" .. key .. "'." end end
     local replacement, errorMessage = {}
     if changes.name ~= nil then
@@ -296,7 +397,12 @@ function FW:UpdateProfile(id, changes)
         -- Partial programmatic updates leave unspecified weights unchanged.
         for key in pairs(changes.weights) do replacement.weights[key] = checked[key] end
     end
+    if changes.itemFilters ~= nil then
+        replacement.itemFilters, errorMessage = validItemFilters(changes.itemFilters, profile.itemFilters)
+        if not replacement.itemFilters then return nil, errorMessage end
+    end
     local scoreChanged = replacement.secondaryUnit and replacement.secondaryUnit ~= profile.secondaryUnit
+    if replacement.itemFilters and not itemFiltersEqual(replacement.itemFilters, profile.itemFilters) then scoreChanged = true end
     if replacement.weights then
         for key, value in pairs(replacement.weights) do if value ~= profile.weights[key] then scoreChanged = true break end end
     end
@@ -340,6 +446,7 @@ function FW:CopyProfile(id)
     profile.active = original.active
     profile.color = { r = original.color.r, g = original.color.g, b = original.color.b }
     profile.secondaryUnit = original.secondaryUnit
+    profile.itemFilters = cloneItemFilters(original.itemFilters)
     self:NotifyChanged()
     return profile
 end
@@ -349,10 +456,10 @@ function FW:ImportProfile(source, fallbackName)
     local decoded, errorMessage = self.JSON.Decode(source)
     if decoded == nil then return nil, errorMessage end
     if not plainObject(decoded) then return nil, "Import must be a weight object or a ZwykValues profile object." end
-    local weights, name, color, unit
+    local weights, name, color, unit, filters
     local warnings = {}
     if decoded.weights ~= nil or decoded.format ~= nil then
-        local allowed = { format = true, version = true, name = true, color = true, secondaryUnit = true, weights = true }
+        local allowed = { format = true, version = true, name = true, color = true, secondaryUnit = true, weights = true, itemFilters = true }
         for key in pairs(decoded) do if not allowed[key] then return nil, "Unknown profile field '" .. key .. "'." end end
         if decoded.format ~= "ZwykValues" and decoded.format ~= "ZwykPoints" and decoded.format ~= "ForeverWeights" then
             return nil, "Profile format must be 'ZwykValues', 'ZwykPoints' or 'ForeverWeights'."
@@ -366,6 +473,10 @@ function FW:ImportProfile(source, fallbackName)
         if not color then return nil, errorMessage end
         unit, errorMessage = validUnit(decoded.secondaryUnit or "percent")
         if not unit then return nil, errorMessage end
+        local importedFilters = decoded.itemFilters
+        if importedFilters == nil then importedFilters = {} end
+        filters, errorMessage = validItemFilters(importedFilters)
+        if not filters then return nil, errorMessage end
     else
         weights, errorMessage = validWeights(decoded)
         if not weights then return nil, errorMessage end
@@ -379,6 +490,7 @@ function FW:ImportProfile(source, fallbackName)
     profile, errorMessage = self:CreateProfile(name, weights)
     if not profile then return nil, errorMessage end
     profile.color, profile.secondaryUnit = color, unit
+    if filters then profile.itemFilters = filters end
     self:NotifyChanged()
     return profile, nil, warnings
 end
@@ -392,7 +504,7 @@ function FW:ExportProfile(id, bare)
     return self.JSON.Encode({
         format = "ZwykValues", version = 1, name = profile.name,
         color = { r = profile.color.r, g = profile.color.g, b = profile.color.b },
-        secondaryUnit = profile.secondaryUnit, weights = weights,
+        secondaryUnit = profile.secondaryUnit, weights = weights, itemFilters = cloneItemFilters(profile.itemFilters),
     })
 end
 
@@ -512,13 +624,22 @@ function FW:ClearItemIssues()
     self.DB.itemIssues = {}
 end
 
-function FW:GetScore(link, profile)
+function FW:GetScore(link, profile, ignoreFilters)
     self:Initialize()
     if type(profile) == "string" then profile = self.DB.profiles[profile] end
     if type(profile) ~= "table" or not self.DB.profiles[profile.id] then return nil, "Profile not found." end
     local record, errorMessage = self:GetItem(link)
     if not record then return nil, errorMessage or "Item data is not available yet." end
     if type(record.key) ~= "string" or type(record.stats) ~= "table" then return nil, "Item data is incomplete." end
+    if not ignoreFilters then
+        local allowed, reason = self:IsItemAllowed(record, profile)
+        if allowed == nil and self.RefreshItemFilterMetadata then
+            self:RefreshItemFilterMetadata(record)
+            allowed, reason = self:IsItemAllowed(record, profile)
+        end
+        if allowed == false then return nil, record, "excluded" end
+        if allowed == nil then return nil, reason end
+    end
     local cache = self.DB.cache
     local scores = cache.scores[record.key]
     local cached = type(scores) == "table" and scores[profile.id]

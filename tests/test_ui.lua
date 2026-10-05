@@ -106,6 +106,9 @@ UIParent:SetSize(1920, 1080)
 UISpecialFrames, SlashCmdList, StaticPopupDialogs = {}, {}, {}
 BackdropTemplateMixin = {}
 IsShiftKeyDown = function() return false end
+GetItemSubClassInfo = function(classID, subClassID)
+    if classID == 2 and subClassID == 0 then return "Localized one-handed axes" end
+end
 local popup
 StaticPopup_Show = function(kind, _, _, data) popup = { kind = kind, data = data } end
 
@@ -141,11 +144,54 @@ local function weightBox(text)
     for _, child in ipairs(label.parent.children) do if child.kind == "EditBox" then return child end end
     error("Missing weight editor: " .. text)
 end
+local function filterControl(group, key)
+    return find(function(control) return control.filterGroup == group and control.filterKey == key end)
+end
 local strength, hit = weightBox("Strength"), weightBox("Hit")
 local profile = FW:GetProfiles()[1]
 userText(strength, "2.5")
 userText(hit, "-3")
 equal(profile.weights.strength, 0, "weights remain drafts before applying")
+click("Item filters")
+local filterScroll = ZwykValuesItemFiltersScroll
+local filterDialog = filterScroll.parent.parent
+check(filterDialog:IsShown(), "Item filters opens the filter dialog")
+local filterCount = 0
+for _, group in ipairs(FW.ItemFilterGroups) do
+    for _, definition in ipairs(group.types) do
+        filterCount = filterCount + 1
+        check(filterControl(group.key, definition.key):GetChecked(), "new profiles include " .. group.key .. ":" .. definition.key)
+    end
+end
+check(filterCount >= 22, "filter dialog offers weapon and armor subtype choices")
+check(byText("Localized one-handed axes", "FontString"), "subtype labels use client localization when available")
+check(byText("Plate", "FontString"), "subtype labels retain the definition fallback when the client has none")
+local otherClasses = byText("Include items restricted to other classes", "FontString").parent
+check(otherClasses:GetChecked(), "other-class items are included by default")
+local weaponFilter, armorFilter = filterControl("weapons", "0"), filterControl("armor", "4")
+local beforeFilters = upgradeRefreshes
+weaponFilter:SetChecked(false)
+weaponFilter:Fire("OnClick")
+armorFilter:SetChecked(false)
+armorFilter:Fire("OnClick")
+otherClasses:SetChecked(false)
+otherClasses:Fire("OnClick")
+equal(profile.itemFilters.weapons["0"], false, "weapon filter is saved immediately")
+equal(profile.itemFilters.armor["4"], false, "armor filter is saved immediately")
+equal(profile.itemFilters.includeOtherClasses, false, "other-class restriction filter is saved immediately")
+equal(profile.itemFilters.weapons["1"], true, "partial filter updates retain other weapon types")
+equal(profile.itemFilters.armor["1"], true, "partial filter updates retain other armor types")
+equal(upgradeRefreshes, beforeFilters + 3, "each filter edit refreshes indicators")
+equal(strength:GetText(), "2.5", "filter edits preserve unsaved strength weights")
+equal(hit:GetText(), "-3", "filter edits preserve every unsaved weight")
+equal(profile.weights.strength, 0, "filter edits do not apply unsaved weights")
+click("Done")
+check(not filterDialog:IsShown(), "Done closes item filters")
+local filterWidgets = #widgets
+click("Item filters")
+equal(#widgets, filterWidgets, "reopening filters reuses its widgets")
+check(not weaponFilter:GetChecked() and not armorFilter:GetChecked() and not otherClasses:GetChecked(), "saved exclusions survive reopening filters")
+click("Done")
 FW:InvalidateCache()
 equal(strength:GetText(), "2.5", "cache refresh preserves unsaved weights")
 equal(hit:GetText(), "-3", "cache refresh preserves every unsaved weight")
@@ -221,6 +267,18 @@ click("Copy")
 equal(#FW:GetProfiles(), 2, "copy creates another profile")
 local copied = FW:GetProfiles()[2]
 equal(copied.weights.strength, 4, "copy retains saved weights")
+click("Item filters")
+check(not weaponFilter:GetChecked() and not armorFilter:GetChecked() and not otherClasses:GetChecked(), "copied profile keeps original item filters")
+weaponFilter:SetChecked(true)
+weaponFilter:Fire("OnClick")
+equal(copied.itemFilters.weapons["0"], true, "filter edit targets the selected copied profile")
+equal(profile.itemFilters.weapons["0"], false, "copied profile filters are independent")
+find(function(control) return control.kind == "Button" and control.profileID == profile.id end):Fire("OnClick")
+check(not weaponFilter:GetChecked(), "open filter dialog follows a profile selection change")
+check(byText("Item filters for " .. profile.name, "FontString"), "filter dialog identifies selected profile")
+find(function(control) return control.kind == "Button" and control.profileID == copied.id end):Fire("OnClick")
+check(weaponFilter:GetChecked(), "switching back restores the copied profile filter")
+click("Done")
 check(not main:GetChecked(), "copying a main profile does not designate the copy main")
 equal(FW:GetMainProfile(), profile, "copy leaves original main designation intact")
 main:SetChecked(true)
@@ -244,6 +302,8 @@ equal(exported.name, copied.name, "export is the selected full profile")
 equal(exported.weights.strength, 4, "export carries weights")
 equal(exported.color.b, copied.color.b, "export carries color")
 equal(exported.secondaryUnit, copied.secondaryUnit, "export carries stat units")
+equal(exported.itemFilters.weapons["0"], true, "profile export carries its item filters")
+equal(exported.itemFilters.armor["4"], false, "profile export retains subtype exclusions")
 equal(dialogText.maxLetters, 131072, "profile input retains its limit")
 click("Close")
 click("Export issues")
@@ -300,6 +360,21 @@ for _, dimensions in ipairs({ {930, 720}, {850, 600} }) do
     within(byText("Apply weights", "Button"), FW.UI, "apply button fits editor")
     within(byText("Clear cache", "Button"), FW.UI, "cache button fits footer")
     check(ZwykValuesStatsScroll:GetHeight() >= 190, "resized editor keeps useful visible weight area")
+    within(byText("Item filters", "Button"), FW.UI, "filter button fits minimum editor width")
+    separate(byText("Item filters", "Button"), byText("Rating", "FontString"), "filter button leaves room for secondary-unit choices")
+    within(filterDialog, FW.UI, "filter dialog fits minimum editor size")
+    within(otherClasses, filterDialog, "class-restriction checkbox fits filter dialog")
+    within(byText("Include items restricted to other classes", "FontString"), filterDialog, "class-restriction label fits filter dialog")
+    separate(otherClasses, filterScroll, "class restriction does not overlap subtype choices")
+    check(filterScroll:GetHeight() >= 290, "filter dialog keeps a useful visible subtype list")
+    check(filterScroll:GetVerticalScrollRange() > 0, "long subtype choices are available through scrolling")
+    for _, group in ipairs(FW.ItemFilterGroups) do
+        for _, definition in ipairs(group.types) do
+            local control = filterControl(group.key, definition.key)
+            within(control, filterScroll.scrollChild, "subtype checkbox fits scroll content")
+            for _, child in ipairs(control.children) do within(child, filterScroll.scrollChild, "subtype label fits scroll content") end
+        end
+    end
     local upgradePanel = main.parent
     within(upgradePanel, FW.UI, "upgrade panel fits minimum editor size")
     within(mainName, upgradePanel, "main name fits upgrade panel")
@@ -315,4 +390,17 @@ for _, dimensions in ipairs({ {930, 720}, {850, 600} }) do
     separate(arrowControls[1], arrowControls[2], "bag and roll arrow toggles do not overlap")
     separate(arrowControls[2], arrowControls[3], "roll and chat arrow toggles do not overlap")
 end
+click("Item filters")
+local remaining = FW:GetProfiles()
+for _, existing in ipairs(remaining) do FW:DeleteProfile(existing.id) end
+check(not byText("Item filters", "Button").enabled, "filter button is disabled without a profile")
+check(not otherClasses.enabled and not weaponFilter.enabled and not armorFilter.enabled, "open filters disable their controls when the profile is deleted")
+local restored = assert(FW:CreateProfile("Restored profile", {}))
+check(byText("Item filters", "Button").enabled, "creating a profile re-enables filters")
+check(otherClasses.enabled and weaponFilter.enabled and armorFilter.enabled, "new profile enables existing dialog controls")
+check(otherClasses:GetChecked() and weaponFilter:GetChecked() and armorFilter:GetChecked(), "new profile restores default inclusion")
+click("Done")
+click("Item filters")
+FW.UI:Hide()
+check(not filterDialog:IsShown(), "closing the editor hides its filter dialog")
 print("UI: " .. passed .. " checks passed (widget smoke and approximate geometry).")

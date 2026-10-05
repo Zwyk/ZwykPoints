@@ -1,5 +1,5 @@
 local _, FW = ...
-local MAX_ITEMS, PARSER_VERSION = 2000, 3
+local MAX_ITEMS, PARSER_VERSION = 2000, 4
 
 local function number(value)
     if issecretvalue and issecretvalue(value) then return nil end
@@ -60,10 +60,10 @@ function FW:GetBaseItemLink(link)
     return "item:" .. itemID .. ":0" .. remaining
 end
 
-function FW:GetBaseScore(link, profile)
+function FW:GetBaseScore(link, profile, ignoreFilters)
     local baseLink = self:GetBaseItemLink(link)
     if not baseLink then return nil, "Invalid item link." end
-    return self:GetScore(baseLink, profile)
+    return self:GetScore(baseLink, profile, ignoreFilters)
 end
 
 function FW:ItemKey(link)
@@ -146,18 +146,22 @@ end
 
 local scanner
 local function tooltipLines(link)
-    local lines, details = {}, {}
+    local lines, details, readable = {}, {}, true
+    local function readableText(value)
+        return not (issecretvalue and issecretvalue(value)) and (value == nil or type(value) == "string")
+    end
     if C_TooltipInfo and C_TooltipInfo.GetHyperlink then
         local ok, data = pcall(C_TooltipInfo.GetHyperlink, link)
         if ok and type(data) == "table" and type(data.lines) == "table" then
             for index, line in ipairs(data.lines) do
+                if not readableText(line.leftText) or not readableText(line.rightText) then readable = false end
                 local left, right = clean(line.leftText), clean(line.rightText)
                 details[#details + 1] = { index = index, leftText = line.leftText,
-                    rightText = line.rightText, type = line.type }
+                    rightText = line.rightText, type = line.type, requirementType = line.requirementType }
                 if left ~= "" then lines[#lines + 1] = left end
                 if right ~= "" and right ~= left then lines[#lines + 1] = right end
             end
-            if #lines > 0 then return lines, "C_TooltipInfo", details end
+            if #lines > 0 then return lines, "C_TooltipInfo", details, readable end
         end
     end
     if not CreateFrame then return lines, nil, details end
@@ -174,6 +178,7 @@ local function tooltipLines(link)
             local left = _G["ZwykValuesScanTooltipTextLeft" .. i]
             local right = _G["ZwykValuesScanTooltipTextRight" .. i]
             local rawLeft, rawRight = left and left:GetText(), right and right:GetText()
+            if not readableText(rawLeft) or not readableText(rawRight) then readable = false end
             local leftText, rightText = clean(rawLeft), clean(rawRight)
             details[#details + 1] = { index = i, leftText = rawLeft, rightText = rawRight }
             if leftText ~= "" then lines[#lines + 1] = leftText end
@@ -181,7 +186,140 @@ local function tooltipLines(link)
         end
     end
     scanner:Hide()
-    return lines, #lines > 0 and "GameTooltip" or nil, details
+    return lines, #lines > 0 and "GameTooltip" or nil, details, readable
+end
+
+local function identifier(value)
+    value = number(value)
+    return value and value >= 0 and value == math.floor(value) and value or nil
+end
+
+local function itemClassification(link, info)
+    local classID, subclassID = info and identifier(info[13]), info and identifier(info[14])
+    local modern = C_Item and C_Item.GetItemInfoInstant
+    local previous
+    for _, getter in ipairs({ modern or false, GetItemInfoInstant or false }) do
+        if classID ~= nil and subclassID ~= nil then break end
+        if getter and getter ~= previous then
+            previous = getter
+            local instant = { pcall(getter, link) }
+            if instant[1] then
+                classID, subclassID = classID or identifier(instant[7]), subclassID or identifier(instant[8])
+            end
+        end
+    end
+    return classID, subclassID
+end
+
+local restrictionFormats
+local function getRestrictionFormats()
+    if restrictionFormats then return restrictionFormats end
+    restrictionFormats = {}
+    local function addFormat(value, kind)
+        local text = lower(clean(value))
+        local first, last = text:find("%%[%d%$]*s")
+        if not first then return end
+        local separators, finish = {}, last
+        while true do
+            local nextFirst, nextLast = text:find("%%[%d%$]*s", finish + 1)
+            if not nextFirst then break end
+            local separator = text:sub(finish + 1, nextFirst - 1)
+            if separator ~= "" then separators[#separators + 1] = separator end
+            finish = nextLast
+        end
+        local prefix, suffix = text:sub(1, first - 1), text:sub(finish + 1)
+        if clean(prefix) == "" and clean(suffix) == "" then return end
+        local function pattern(part) return escape(clean(part)):gsub(" ", "%%s*") end
+        restrictionFormats[#restrictionFormats + 1] = { kind = kind, separators = separators,
+            pattern = "^" .. pattern(prefix) .. "%s*(.-)%s*" .. pattern(suffix) .. "$" }
+    end
+    for name, value in pairs(_G) do
+        if type(name) == "string" and type(value) == "string" then
+            if name == "ITEM_CLASSES_ALLOWED" or name:match("^ITEM_CLASSES_ALLOWED_") then addFormat(value, "class")
+            elseif name == "ITEM_RACES_ALLOWED" or name:match("^ITEM_RACES_ALLOWED_") then addFormat(value, "race") end
+        end
+    end
+    local locale = GetLocale and GetLocale() or "enUS"
+    if locale == "enUS" or locale == "enGB" or locale == "frFR" then
+        addFormat("Classes: %s", "class"); addFormat("Races: %s", "race")
+    end
+    return restrictionFormats
+end
+
+local function classNames()
+    local names = {}
+    local function addName(token, name)
+        if (issecretvalue and (issecretvalue(token) or issecretvalue(name))) then return end
+        if type(token) == "string" and token:match("^[A-Z]+$") and type(name) == "string" and clean(name) ~= "" then
+            names[lower(clean(name))], names[lower(token)] = token, token
+        end
+    end
+    for _, list in ipairs({ LOCALIZED_CLASS_NAMES_MALE or {}, LOCALIZED_CLASS_NAMES_FEMALE or {} }) do
+        if type(list) == "table" then for token, name in pairs(list) do addName(token, name) end end
+    end
+    local locale = GetLocale and GetLocale() or "enUS"
+    if locale == "enUS" or locale == "enGB" then
+        for _, token in ipairs({ "WARRIOR", "PALADIN", "HUNTER", "ROGUE", "PRIEST", "SHAMAN", "MAGE", "WARLOCK", "DRUID" }) do
+            addName(token, token)
+        end
+    end
+    if UnitClass then
+        local ok, name, token = pcall(UnitClass, "player")
+        if ok then addName(token, name) end
+    end
+    return names
+end
+
+local function classRestrictions(details, readable)
+    local formats, names = getRestrictionFormats(), classNames()
+    local hasClassFormat = false
+    for _, format in ipairs(formats) do if format.kind == "class" then hasClassFormat = true; break end end
+    local contentRows = 0
+    for _, line in ipairs(details) do
+        if clean(line.leftText) ~= "" or clean(line.rightText) ~= "" then contentRows = contentRows + 1 end
+    end
+    local known, allowed, unknown = readable == true and contentRows > 1 and hasClassFormat, nil, {}
+    local function retrieving(text)
+        if text == "" then return false end
+        return text == lower(clean(_G.RETRIEVING_ITEM_INFO)) or text == lower(clean(_G.RETRIEVING_DATA))
+            or text:find("^retrieving item information") or text:find("^retrieving data")
+            or text:find("^récupération des informations") or text:find("^récupération des données")
+    end
+    for index, line in ipairs(details) do
+        if index > 1 then
+            local left, right = lower(clean(line.leftText)), lower(clean(line.rightText))
+            if retrieving(left) or retrieving(right) then known = false end
+            local format, list
+            local candidates = left ~= right and { left .. " " .. right, left, right } or { left }
+            for _, candidate in ipairs(candidates) do
+                candidate = clean(candidate)
+                for _, entry in ipairs(formats) do
+                    list = candidate:match(entry.pattern)
+                    if list ~= nil then format = entry; break end
+                end
+                if format then break end
+            end
+            if format and format.kind == "class" then
+                allowed = allowed or {}
+                list = list:gsub("，", ","):gsub("、", ","):gsub("；", ","):gsub("[;/]", ",")
+                for _, separator in ipairs(format.separators) do list = list:gsub(escape(separator), ",") end
+                local locale = GetLocale and GetLocale() or "enUS"
+                if locale == "enUS" or locale == "enGB" then list = list:gsub(" and ", ",")
+                elseif locale == "frFR" then list = list:gsub(" et ", ",") end
+                for name in (list .. ","):gmatch("(.-),") do
+                    name = clean(name)
+                    local token = names[name]
+                    if token then allowed[token] = true
+                    else known = false; unknown[#unknown + 1] = name end
+                end
+            elseif not format and identifier(line.type) == 43 and identifier(line.requirementType) == 0 then
+                -- RaceClass requirements without readable native Classes/Races
+                -- text cannot safely establish that this item is unrestricted.
+                known = false; unknown[#unknown + 1] = clean(left .. " " .. right)
+            end
+        end
+    end
+    return allowed, known, #unknown > 0 and unknown or nil
 end
 
 local function requestItem(itemID)
@@ -213,6 +351,7 @@ function FW:GetRawItemStats(link)
         end
         if info[1] and info[2] then
             result.name, result.link, result.equipLoc = info[2], info[3] or link, info[10] or ""
+            result.classID, result.subclassID = itemClassification(link, info)
         end
     end
     if not result.name then requestItem(itemID); return result end
@@ -238,7 +377,9 @@ function FW:GetRawItemStats(link)
     end
     table.sort(result.unknownKeys)
     table.sort(result.ignoredKeys)
-    result.tooltipLines, result.tooltipSource, result.tooltipDetails = tooltipLines(link)
+    result.tooltipLines, result.tooltipSource, result.tooltipDetails, result.tooltipReadable = tooltipLines(link)
+    result.allowedClasses, result.classRestrictionsKnown, result.classRestrictionUnknownNames =
+        classRestrictions(result.tooltipDetails, result.tooltipReadable)
     result.ready = result.apiAvailable or #result.tooltipLines > 0
     for _, line in ipairs(result.tooltipLines) do
         local text = lower(clean(line))
@@ -250,6 +391,31 @@ function FW:GetRawItemStats(link)
     end
     if not result.ready then requestItem(itemID) end
     return result
+end
+
+function FW:RefreshItemFilterMetadata(record)
+    if type(record) ~= "table" or type(record.link) ~= "string" then return end
+    local diagnostic = record.diagnostic or {}
+    if record.classID == nil or record.subclassID == nil then
+        local getter = C_Item and C_Item.GetItemInfo or GetItemInfo
+        local info = getter and { pcall(getter, record.link) } or nil
+        if (not info or not info[1] or not info[2]) and GetItemInfo and getter ~= GetItemInfo then
+            info = { pcall(GetItemInfo, record.link) }
+        end
+        if info and not info[1] then info = nil end
+        local classID, subclassID = itemClassification(record.link, info)
+        record.classID, record.subclassID = record.classID or classID, record.subclassID or subclassID
+        diagnostic.classID, diagnostic.subclassID = record.classID, record.subclassID
+    end
+    if record.classRestrictionsKnown ~= true then
+        restrictionFormats = nil -- Native locale/class globals may have loaded since the first read.
+        local lines, source, details, readable = tooltipLines(record.link)
+        record.allowedClasses, record.classRestrictionsKnown, record.classRestrictionUnknownNames = classRestrictions(details, readable)
+        diagnostic.tooltipLines, diagnostic.tooltipSource, diagnostic.tooltipDetails, diagnostic.tooltipReadable = lines, source, details, readable
+        diagnostic.allowedClasses, diagnostic.classRestrictionsKnown, diagnostic.classRestrictionUnknownNames =
+            record.allowedClasses, record.classRestrictionsKnown, record.classRestrictionUnknownNames
+    end
+    record.diagnostic = diagnostic
 end
 
 local labels = {
@@ -604,6 +770,9 @@ function FW:GetItem(link)
     if not diagnostic.ready then return nil, "Item data is still loading." end
     local record = { key = key, link = diagnostic.link or link, itemID = diagnostic.itemID,
         equipLoc = diagnostic.equipLoc or "", stats = {}, percentStats = {}, ratingStats = {},
+        classID = diagnostic.classID, subclassID = diagnostic.subclassID,
+        allowedClasses = diagnostic.allowedClasses, classRestrictionsKnown = diagnostic.classRestrictionsKnown,
+        classRestrictionUnknownNames = diagnostic.classRestrictionUnknownNames,
         unresolvedStats = {}, unrecognizedLines = {}, warnings = {}, partial = false,
         name = diagnostic.name, parserVersion = PARSER_VERSION,
         diagnostic = self.CopyItemDiagnostic and self:CopyItemDiagnostic(diagnostic) or diagnostic }
