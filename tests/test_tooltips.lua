@@ -40,8 +40,10 @@ function FW:CompareItem()
     }}
 end
 
+local testTooltips = {}
 local function tooltip(name, link)
     local frame = {name=name,link=link,lines={},scripts={},shown=true,fontStrings={}}
+    testTooltips[#testTooltips+1] = frame
     local function registerLines(self,index)
         for _, side in ipairs({"Left", "Right"}) do
             local key = side .. index
@@ -597,4 +599,101 @@ postCall(relevanceRefresh,{hyperlink=variant})
 assert(#relevanceRefresh.lines==3 and math.abs(RelevantBaseRefreshTextLeft3.size-10.2)<1e-9, "reappearing Base rows shrink once without accumulating")
 relevanceRefresh:Hide()
 assert(RelevantBaseRefreshTextLeft3.size==12 and RelevantBaseRefreshTextRight3.size==12)
+
+-- Recipe and spell tooltips can use the same native frame and callbacks as
+-- equipment. Their hyperlink payload must never enter the item-score pipeline.
+for _, tip in ipairs(testTooltips) do tip:Hide() end
+local ignoredCalls = {item=0,score=0,compare=0,baseScore=0,baseCompare=0}
+local ignoredRefreshes = 0
+local issueRecord = {stats={},partial=true,unrecognizedLines={{text="Recipe description"}}}
+function FW:GetItem() ignoredCalls.item=ignoredCalls.item+1; return issueRecord end
+function FW:GetScore() ignoredCalls.score=ignoredCalls.score+1; return 100,issueRecord end
+function FW:GetBaseScore() ignoredCalls.baseScore=ignoredCalls.baseScore+1; return 80,issueRecord end
+function FW:CompareItem()
+    ignoredCalls.compare=ignoredCalls.compare+1
+    return {score=100,record=issueRecord,comparisons={}}
+end
+function FW:CompareBaseItem()
+    ignoredCalls.baseCompare=ignoredCalls.baseCompare+1
+    return {score=80,record=issueRecord,comparisons={}}
+end
+FW.DB.options.debugUnknownStats=true
+FW.DB.options.showComparisons=true
+local function assertIgnored(tip, context)
+    assert(#tip.lines==1 and tip.lines[1].text=="Native recipe description", context .. " keeps native rows without scores or warnings")
+    assert(tip.fwSignature==nil and tip.fwSourceLink==nil, context .. " retains no item signature or source")
+    for key,value in pairs(ignoredCalls) do assert(value==0, context .. " does not call " .. key) end
+    tip.RefreshData=function() ignoredRefreshes=ignoredRefreshes+1 end
+end
+local rejectedTips = {}
+for _, payload in ipairs({"enchant:7418", "spell:7418", "recipe:7418", "trade:Player-1-ABCD:7418"}) do
+    for _, link in ipairs({payload, "|cffffd000|H" .. payload .. "|h[Recipe item:501]|h|r"}) do
+        local index = #rejectedTips+1
+        local fromItem=tooltip("NonItemGetItem" .. index,link)
+        fromItem:AddLine("Native recipe description")
+        FW.HookTooltip(fromItem)
+        fromItem:Fire("OnTooltipSetItem")
+        assertIgnored(fromItem,"GetItem " .. link)
+        rejectedTips[#rejectedTips+1]=fromItem
+
+        local fromHyperlink=tooltip("NonItemHyperlink" .. index,nil)
+        FW.HookTooltip(fromHyperlink)
+        fromHyperlink:SetHyperlink(link)
+        fromHyperlink:AddLine("Native recipe description")
+        assertIgnored(fromHyperlink,"SetHyperlink " .. link)
+        rejectedTips[#rejectedTips+1]=fromHyperlink
+
+        for _, field in ipairs({"hyperlink", "itemLink"}) do
+            local fromPost=tooltip("NonItemPost" .. index .. field,nil)
+            fromPost.GetItem=nil
+            fromPost:AddLine("Native recipe description")
+            postCall(fromPost,{[field]=link,id=7418})
+            assertIgnored(fromPost,"Modern " .. field .. " " .. link)
+            rejectedTips[#rejectedTips+1]=fromPost
+        end
+    end
+end
+FW:RefreshTooltips()
+assert(ignoredRefreshes==0, "non-item tooltips are not watched for equipment refreshes")
+for _, tip in ipairs(rejectedTips) do
+    assert(tip:IsShown(), "refreshing items does not hide an unrelated recipe tooltip")
+    assertIgnored(tip,"Refreshed non-item tooltip")
+end
+GameTooltip=rejectedTips[#rejectedTips]
+assert(FW:GetHoveredItemLink()==nil, "a recipe hover cannot be inspected as an item")
+
+-- Keep actual item variants working through each supported source, including
+-- modern frames that only expose the exact variant through SetHyperlink.
+FW.DB.options.debugUnknownStats=false
+issueRecord={stats={}}
+local validRaw=tooltip("ValidItemPayload","item:501:1234:0:0:0:0:-7:111:60")
+FW.HookTooltip(validRaw)
+validRaw:Fire("OnTooltipSetItem")
+assert(#validRaw.lines==3 and validRaw.fwSignature, "a raw item payload still receives full and Base rows")
+local validWrappedLink="|cff0070dd|Hitem:501:1234:0:0:0:0:-7:111:60|h[Equipment]|h|r"
+local validWrapped=tooltip("ValidWrappedItem",nil)
+validWrapped.GetItem=nil
+FW.HookTooltip(validWrapped)
+validWrapped:SetHyperlink(validWrappedLink)
+assert(#validWrapped.lines==3 and validWrapped.fwSourceLink==validWrappedLink, "a wrapped item variant remains available to modern hooks")
+local validModern=tooltip("ValidModernItem",nil)
+validModern.GetItem=nil
+postCall(validModern,{hyperlink=variant,id=501})
+assert(#validModern.lines==3 and validModern.fwSignature, "modern item post data still receives scores")
+assert(ignoredCalls.compare==3 and ignoredCalls.baseCompare==3 and ignoredCalls.item==0, "legitimate items reach comparison and Base readers once")
+
+-- Switching this frame to a recipe must discard the item source rather than
+-- reusing its previous exact variant when modern data is only an ID.
+validWrapped:SetHyperlink("enchant:7418")
+assert(#validWrapped.lines==0 and validWrapped.fwSignature==nil and validWrapped.fwSourceLink==nil, "an item-to-enchant transition clears saved item decoration")
+validWrapped:AddLine("Native recipe description")
+postCall(validWrapped,{id=7418})
+assert(#validWrapped.lines==1 and validWrapped.fwSignature==nil and validWrapped.fwSourceLink==nil, "an ID-only recipe post call cannot reuse the previous item source")
+assert(ignoredCalls.compare==3 and ignoredCalls.baseCompare==3, "recipe transitions do not score the previous item or their own payload")
+validWrapped.RefreshData=function() ignoredRefreshes=ignoredRefreshes+1 end
+validRaw:Hide(); validModern:Hide()
+FW:RefreshTooltips()
+assert(ignoredRefreshes==0 and validWrapped:IsShown(), "a transitioned recipe is removed from item refresh watching")
+GameTooltip=validWrapped
+assert(FW:GetHoveredItemLink()==nil, "a reused tooltip no longer exposes the old item as hovered")
 print("Tooltip tests passed")

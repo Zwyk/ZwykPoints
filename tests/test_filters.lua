@@ -32,7 +32,8 @@ local function contains(value, text)
 end
 local function fixture(link, classID, subclassID, strength, equipLoc, allowedClasses, known)
     local record = {key=FW:ItemKey(link), link=link, name="Fixture " .. link, classID=classID, subclassID=subclassID,
-        stats={strength=strength}, percentStats={}, ratingStats={}, equipLoc=equipLoc or "INVTYPE_HEAD",
+        stats={strength=strength}, percentStats={}, ratingStats={},
+        equipLoc=equipLoc or (classID == 2 and "INVTYPE_WEAPON" or "INVTYPE_HEAD"),
         allowedClasses=allowedClasses, classRestrictionsKnown=known ~= false, partial=false}
     records[link] = record
     return record
@@ -170,7 +171,10 @@ equal(score, nil); contains(detail, "Player class")
 playerClass = "PALADIN"
 allOn(main)
 local noMetadataNeeded = fixture("item:1006:0", nil, nil, 10, nil, nil, false)
-equal(FW:GetScore(noMetadataNeeded.link, main), 10, "all-inclusive defaults do not require optional metadata")
+score, detail = FW:GetScore(noMetadataNeeded.link, main)
+equal(score, nil); contains(detail, "type data")
+noMetadataNeeded.classID, noMetadataNeeded.subclassID = 4, 4
+equal(FW:GetScore(noMetadataNeeded.link, main), 10, "all-inclusive defaults still wait for positive gear classification")
 
 -- Base and enchanted item paths apply the same candidate filters, while the
 -- baseline includes equipped gear even when those item types were unchecked.
@@ -338,10 +342,17 @@ local nonGear = {
     {label="unsupported weapon slot", classID=2, equipLoc="INVTYPE_PROFESSION_TOOL"},
     {label="miscellaneous item", classID=15, equipLoc=""},
     {label="nonwearable armor", classID=4, equipLoc=""},
+    {label="future unsupported item class", classID=42, equipLoc="INVTYPE_HEAD"},
+    {label="future unsupported weapon subtype", classID=2, subclassID=99, equipLoc="INVTYPE_WEAPON"},
+    {label="future unsupported armor subtype", classID=4, subclassID=99, equipLoc="INVTYPE_HEAD"},
+    {label="weapon in an armor slot", classID=2, subclassID=7, equipLoc="INVTYPE_HEAD"},
+    {label="armor in a weapon slot", classID=4, subclassID=4, equipLoc="INVTYPE_WEAPON"},
+    {label="weapon in a relic slot", classID=2, subclassID=7, equipLoc="INVTYPE_RELIC"},
+    {label="armor in a ranged weapon slot", classID=4, subclassID=4, equipLoc="INVTYPE_RANGED"},
 }
 for index, data in ipairs(nonGear) do
-    local full = fixture("item:" .. (4000+index) .. ":42:0", data.classID, 0, 99, data.equipLoc)
-    local base = fixture("item:" .. (4000+index) .. ":0:0", data.classID, 0, 88, data.equipLoc)
+    local full = fixture("item:" .. (4000+index) .. ":42:0", data.classID, data.subclassID or 0, 99, data.equipLoc)
+    local base = fixture("item:" .. (4000+index) .. ":0:0", data.classID, data.subclassID or 0, 88, data.equipLoc)
     for _, record in ipairs({full,base}) do
         FW.DB.cache.scores[record.key] = {[main.id]={revision=main.revision,score=999}}
     end
@@ -377,10 +388,14 @@ for index, data in ipairs(nonGear) do
         _G[itemTooltip.name .. "TextLeft1"] = nil
     end
 end
+for _, classID in ipairs({2, 4}) do
+    equal(FW:IsItemAllowed({classID=classID,subclassID=99}, main), false,
+        "unlisted subtype cannot become allowed because its checkbox is absent")
+end
 FW.DB.options.showComparisons, FW.DB.options.debugUnknownStats = true, false
 
--- Accessories and existing character clothing slots are still gear. A known
--- equipment slot also remains sufficient on legacy tuples without class IDs.
+-- Accessories and existing character clothing slots are still gear once the
+-- item class/subclass positively identifies a supported type.
 for index, data in ipairs({
     {label="ring", equipLoc="INVTYPE_FINGER"},
     {label="offhand", equipLoc="INVTYPE_HOLDABLE"},
@@ -391,7 +406,13 @@ for index, data in ipairs({
     equal(FW:GetScore(garment.link, main), 7, data.label .. " remains eligible gear")
 end
 local legacyGear = fixture("item:4110:0", nil, nil, 9, "INVTYPE_HEAD", nil, false)
-equal(FW:GetScore(legacyGear.link, main), 9, "known gear slot works without optional class metadata")
+score, detail = FW:GetScore(legacyGear.link, main)
+equal(score, nil); contains(detail, "type data")
+legacyGear.classID = 4
+score, detail = FW:GetScore(legacyGear.link, main, true)
+equal(score, nil); contains(detail, "subtype data")
+legacyGear.subclassID = 4
+equal(FW:GetScore(legacyGear.link, main), 9, "legacy gear recovers after class and subtype data arrive")
 
 -- Ammunition remains eligible and contributes through the existing ranged DPS
 -- weight. Weapon/armor subtype choices do not classify projectiles as either.
@@ -413,7 +434,10 @@ equal(scoreCalls, ammoComputed, "ammunition full and Base totals use the persist
 equal(FW:GetScore(ammunition.link, ammoProfile, true), 8, "equipped ammunition follows the same ranged DPS scoring")
 local legacyAmmo = fixture("item:4131:0", nil, nil, 0, "INVTYPE_AMMO", nil, false)
 legacyAmmo.stats = {rangedDps=3}
-equal(FW:GetScore(legacyAmmo.link, main), 0, "ammunition is eligible on legacy tuples without class IDs")
+score, detail = FW:GetScore(legacyAmmo.link, ammoProfile)
+equal(score, nil); contains(detail, "type data")
+legacyAmmo.classID = 6
+equal(FW:GetScore(legacyAmmo.link, ammoProfile), 6, "ammunition recovers when the projectile class arrives without guessing a subtype")
 equal(FW:GetScore(ammunition.link, main), 0, "zero ranged DPS weight gives eligible ammunition a zero total")
 
 -- Missing or secret equipment metadata waits; completing it restores scoring

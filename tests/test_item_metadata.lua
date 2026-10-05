@@ -75,22 +75,24 @@ local item = assert(FW:GetItem("item:100"))
 equal(item.classID, 4); equal(item.subclassID, 4)
 equal(modernInstantCalls, 0, "complete GetItemInfo metadata needs no instant fallback")
 equal(item.classRestrictionsKnown, true); equal(item.allowedClasses, nil)
-equal(item.parserVersion, 5)
+equal(item.parserVersion, 6)
 equal(FW:GetItem("item:100"), item, "complete metadata remains in the persistent item cache")
 equal(statsCalls, 1); equal(tooltipCalls, 1)
 
-FW = newReader({ oldInfo = true, modernInstant = true, instantClassID = 2, instantSubclassID = 8 })
+FW = newReader({ oldInfo = true, modernInstant = true, instantClassID = 2, instantSubclassID = 8,
+    equipLoc="INVTYPE_2HWEAPON" })
 item = assert(FW:GetItem("item:101"))
 equal(item.classID, 2); equal(item.subclassID, 8)
 equal(modernInstantCalls, 1, "older GetItemInfo tuples use the modern instant API")
 
-FW = newReader({ oldInfo = true, legacyInstant = true, instantClassID = 2, instantSubclassID = 0 })
+FW = newReader({ oldInfo = true, legacyInstant = true, instantClassID = 2, instantSubclassID = 0,
+    equipLoc="INVTYPE_WEAPON" })
 item = assert(FW:GetItem("item:102"))
 equal(item.classID, 2); equal(item.subclassID, 0, "subclass zero is a valid category")
 equal(legacyInstantCalls, 1)
 
 FW = newReader({ oldInfo = true, modernInstant = true, modernInstantError = true,
-    legacyInstant = true, instantClassID = 4, instantSubclassID = 6 })
+    legacyInstant = true, instantClassID = 4, instantSubclassID = 6, equipLoc="INVTYPE_SHIELD" })
 item = assert(FW:GetItem("item:103"))
 equal(item.classID, 4); equal(item.subclassID, 6)
 equal(modernInstantCalls, 1); equal(legacyInstantCalls, 1, "failing modern instant API falls back to the legacy API")
@@ -102,9 +104,14 @@ equal(item.classID, 4); equal(item.subclassID, 1)
 equal(legacyInstantCalls, 1, "the same instant function is not called twice")
 
 FW = newReader({ classID = 4, subclassID = nil })
+local missing, pendingReason = FW:GetItem("item:105")
+equal(missing,nil); assert(type(pendingReason)=="string")
+equal(statsCalls,0); equal(tooltipCalls,0,"missing subtype metadata must be resolved before stat extraction")
+equal(FW.DB.cache.items[FW:ItemKey("item:105")],nil,"unknown subtype is not persisted as gear")
+current.subclassID=4
 item = assert(FW:GetItem("item:105"))
-equal(item.classID, 4); equal(item.subclassID, nil)
-equal(item.partial, false, "missing filter metadata is not a missing stat")
+equal(item.classID,4); equal(item.subclassID,4); equal(item.partial,false)
+item.subclassID=nil
 current.classID, current.subclassID = nil, nil
 FW:RefreshItemFilterMetadata(item)
 equal(item.classID, 4, "refresh cannot erase a previously known class ID")
@@ -114,6 +121,17 @@ equal(item.subclassID, 4)
 equal(statsCalls, 1); equal(tooltipCalls, 1, "category refresh reuses complete restriction metadata")
 equal(item.diagnostic.classID, 4); equal(item.diagnostic.subclassID, 4)
 
+FW = newReader({subclassID=4})
+local missingClassProfile = assert(FW:CreateProfile("Missing item type",{strength=1}))
+local missingClassScore, missingClassReason = FW:GetScore("item:119",missingClassProfile)
+equal(missingClassScore,nil); assert(type(missingClassReason)=="string")
+equal(statsCalls,0); equal(tooltipCalls,0,"a known slot cannot substitute for unknown item class metadata")
+equal(FW.DB.cache.items[FW:ItemKey("item:119")],nil)
+equal(FW.DB.cache.scores[FW:ItemKey("item:119")],nil)
+current.classID=4
+equal(FW:GetScore("item:119",missingClassProfile),5,"later known class metadata recovers without a profile revision")
+equal(statsCalls,1); equal(tooltipCalls,1)
+
 FW = newReader({classID=2,subclassID=2,missingEquipLoc=true,raw={ITEM_MOD_DAMAGE_PER_SECOND_SHORT=5},
     lines={"Test Item","10 - 20 Damage","Speed 3.00"}})
 local profile = assert(FW:CreateProfile("Gear metadata", {rangedDps=1}))
@@ -121,19 +139,20 @@ local score, reason = FW:GetScore("item:117", profile)
 equal(score, nil); assert(reason:find("equipment data",1,true))
 equal(FW.DB.cache.items[FW:ItemKey("item:117")], nil, "missing slot data cannot cache stats in the wrong weapon group")
 equal(FW.DB.cache.scores[FW:ItemKey("item:117")], nil, "missing slot data cannot create a score")
+equal(statsCalls,0); equal(tooltipCalls,0,"missing slot metadata stops before APIs and tooltip scans")
 current.missingEquipLoc = false
 current.equipLoc = "INVTYPE_RANGED"
 equal(FW:GetScore("item:117", profile), 5, "later slot data scores ranged DPS in the correct group")
 item = assert(FW:GetItem("item:117"))
 equal(item.equipLoc, "INVTYPE_RANGED"); equal(item.diagnostic.equipLoc, "INVTYPE_RANGED")
 equal(item.stats.dps, nil); equal(item.stats.rangedDps, 5)
-equal(statsCalls, 2, "pending data is reread once the slot becomes known")
+equal(statsCalls, 1, "pending data is first parsed once the slot becomes known")
 item.equipLoc = nil -- A previously parsed record can still need metadata recovery.
 FW:RefreshItemFilterMetadata(item)
 equal(item.equipLoc, "INVTYPE_RANGED"); equal(item.diagnostic.equipLoc, "INVTYPE_RANGED")
-equal(statsCalls, 2, "metadata recovery reuses parsed stats")
+equal(statsCalls, 1, "metadata recovery reuses parsed stats")
 
-FW = newReader({classID=4,subclassID=4,missingEquipLoc=true,modernInstant=true,instantEquipLoc="INVTYPE_FINGER"})
+FW = newReader({classID=4,subclassID=0,missingEquipLoc=true,modernInstant=true,instantEquipLoc="INVTYPE_FINGER"})
 item = assert(FW:GetItem("item:118"))
 equal(item.equipLoc, "INVTYPE_FINGER", "instant metadata can complete a missing equipment slot")
 equal(modernInstantCalls, 1, "slot fallback works even when both category IDs are already known")

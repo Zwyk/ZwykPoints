@@ -1,5 +1,5 @@
 local _, FW = ...
-local MAX_ITEMS, PARSER_VERSION = 2000, 5
+local MAX_ITEMS, PARSER_VERSION = 2000, 6
 local recentItems, recentCount, recentCache, recentEquipment = {}, 0, nil, nil
 local metadataRetries = setmetatable({}, {__mode="k"})
 local dataWaits = {}
@@ -408,11 +408,12 @@ local function requestItem(itemID)
     if C_Item and C_Item.RequestLoadItemDataByID then pcall(C_Item.RequestLoadItemDataByID, itemID) end
 end
 
-function FW:GetRawItemStats(link)
+function FW:GetRawItemStats(link, profile)
     local payload = itemPayload(link)
     local itemID = payload and tonumber(payload:match("^item:(%d+)"))
     if not itemID then return nil, "Invalid item link." end
-    local result = { itemID = itemID, raw = {}, unknownKeys = {}, ignoredKeys = {}, warnings = {}, ready = false }
+    local result = { itemID = itemID, raw = {}, unknownKeys = {}, ignoredKeys = {}, warnings = {},
+        tooltipLines = {}, tooltipDetails = {}, ready = false }
     local version, build, buildDate, interface = "unknown", "unknown", "unknown", "unknown"
     if GetBuildInfo then version, build, buildDate, interface = GetBuildInfo() end
     result.build = { version = version, build = build, date = buildDate, interface = interface }
@@ -434,6 +435,14 @@ function FW:GetRawItemStats(link)
         end
     end
     if not result.name then requestItem(itemID); return result end
+    -- Only positively identified gear reaches stat APIs and tooltip parsing.
+    local gear, gearError = self:IsGearItem(result)
+    if gear == nil then self:AwaitItemData(link); return nil, gearError end
+    if gear == false then result.ready, result.excluded = true, true; return result end
+    if profile and self:IsItemAllowed(result, profile, true) == false then
+        result.ready, result.profileExcluded = true, true
+        return result
+    end
     local raw
     if C_Item and C_Item.GetItemStats then
         local ok, stats = pcall(C_Item.GetItemStats, link)
@@ -869,7 +878,7 @@ local function scan(record, lines)
     end
 end
 
-function FW:GetItem(link)
+function FW:GetItem(link, profile)
     local key = self:ItemKey(link)
     if not key then return nil, "Invalid item link." end
     self.DB.cache.items = self.DB.cache.items or {}
@@ -878,7 +887,7 @@ function FW:GetItem(link)
     if cached then return cached end
     local recent = self:GetRecentItemRead(key)
     if recent then return recent.record end
-    local diagnostic, err = self:GetRawItemStats(link)
+    local diagnostic, err = self:GetRawItemStats(link, profile)
     if not diagnostic then return nil, err end
     if not diagnostic.ready then return nil, "Item data is still loading." end
     local record = { key = key, link = diagnostic.link or link, itemID = diagnostic.itemID,
@@ -892,6 +901,8 @@ function FW:GetItem(link)
     local gear, gearError = self:IsGearItem(record)
     if gear == false then self:RememberItemRead(record); return record end
     if gear == nil then self:AwaitItemData(record.link); return nil, gearError end
+    -- A profile's unchecked type must not become an empty shared item cache.
+    if diagnostic.profileExcluded then return record end
     for rawKey, rawValue in pairs(diagnostic.raw) do
         if issecretvalue and issecretvalue(rawKey) then rawKey = nil end
         local value = number(rawValue)

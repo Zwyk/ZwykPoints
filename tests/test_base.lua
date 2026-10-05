@@ -13,7 +13,14 @@ end
 local function itemInfo(link)
     local data = items[payload(link)]
     if not data or data.loaded == false then return nil end
-    return data.name, link, 2, 18, 13, "Armor", "Mail", 1, data.equipLoc
+    local weapon = data.equipLoc == "INVTYPE_WEAPON" or data.equipLoc == "INVTYPE_WEAPONMAINHAND"
+        or data.equipLoc == "INVTYPE_WEAPONOFFHAND" or data.equipLoc == "INVTYPE_2HWEAPON"
+    local classID = weapon and 2 or 4
+    local subclassID = weapon and (data.equipLoc == "INVTYPE_2HWEAPON" and 8 or 7)
+        or (data.equipLoc == "INVTYPE_SHIELD" and 6 or 0)
+    return data.name, link, 2, 18, 13, weapon and "Weapon" or "Armor",
+        weapon and "Swords" or (subclassID == 6 and "Shields" or "Miscellaneous"),
+        1, data.equipLoc, 12345, 100, classID, subclassID
 end
 GetBuildInfo = function() return "1.60.1", "70205", "Oct 2 2026", 16001 end
 GetLocale = function() return "enUS" end
@@ -118,7 +125,7 @@ equal(baseScore, 10, "base score is read from the unenchanted variant")
 equal(baseRecord.link, baseLink)
 equal(baseRecord.partial, false)
 assert(fullRecord.key ~= baseRecord.key, "base and full variants need separate cache entries")
-equal(baseRecord.parserVersion, 5, "base scoring uses the current item metadata schema")
+equal(baseRecord.parserVersion, 6, "base scoring uses the current item metadata schema")
 equal(statCalls[baseLink], 1); equal(tooltipCalls[baseLink], 1)
 equal(FW:GetBaseScore("item:100:9999" .. suffix, profile), 10,
     "different enchants reuse the same preserved base variant")

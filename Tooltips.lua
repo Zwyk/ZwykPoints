@@ -12,15 +12,24 @@ local function safeString(value)
     if issecretvalue and issecretvalue(value) then return nil end
     return type(value) == "string" and value or nil
 end
+local function itemLink(value)
+    value = safeString(value)
+    if not value or value == "" then return nil end
+    if FW.GetBaseItemLink then return FW:GetBaseItemLink(value) and value or nil end
+    local plain = value:gsub("^|c%x%x%x%x%x%x%x%x", ""):gsub("^|cn[%w_]+:", ""):gsub("|r$", "")
+    local payload = plain:match("^(item:%d+[%w:%-]*)$") or plain:match("^|H(item:%d+[%w:%-]*)|h.-|h$")
+    local id = payload and tonumber(payload:match("^item:(%d+)"))
+    if id and id > 0 and id < math.huge then return value end
+end
 local function dataLink(data)
     if type(data) ~= "table" then return nil end
-    local link = safeString(data.hyperlink)
-    if not link or link == "" then link = safeString(data.itemLink) end
+    local link = itemLink(data.hyperlink)
+    if not link then link = itemLink(data.itemLink) end
     if link and link ~= "" then return link end
     local guid = safeString(data.guid)
     if guid and C_Item and C_Item.GetItemLinkByGUID then
         local ok, resolved = pcall(C_Item.GetItemLinkByGUID, guid)
-        if ok and safeString(resolved) and resolved ~= "" then return resolved end
+        if ok then return itemLink(resolved) end
     end
 end
 local function comparisonLink(tooltip)
@@ -38,9 +47,11 @@ local function comparisonLink(tooltip)
     end
 end
 local function getLink(tooltip, data)
+    local explicit = type(data) == "table" and (safeString(data.hyperlink) or safeString(data.itemLink))
+    if explicit and explicit ~= "" and not itemLink(explicit) then return nil end
     if tooltip.GetItem then
         local ok, _, link = pcall(tooltip.GetItem, tooltip)
-        if ok and safeString(link) and link ~= "" then return link end
+        if ok and safeString(link) and link ~= "" then return itemLink(link) end
     end
     local link = dataLink(data)
     if link then return link end
@@ -51,9 +62,9 @@ local function getLink(tooltip, data)
     end
     if TooltipUtil and TooltipUtil.GetDisplayedItem then
         local ok, _, displayed = pcall(TooltipUtil.GetDisplayedItem, tooltip)
-        if ok and safeString(displayed) and displayed ~= "" then return displayed end
+        if ok and itemLink(displayed) then return displayed end
     end
-    return comparisonLink(tooltip) or safeString(tooltip.fwSourceLink)
+    return comparisonLink(tooltip) or itemLink(tooltip.fwSourceLink)
 end
 local function plainText(text)
     return text:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", ""):
@@ -300,7 +311,8 @@ function FW:InstallTooltipHooks()
         end
     end
     local function remember(tooltip, link)
-        link = safeString(link)
+        link = itemLink(link)
+        if not link then clear(tooltip); return end
         if link then
             tooltip.fwSourceLink = link
             decorate(tooltip, {hyperlink=link})

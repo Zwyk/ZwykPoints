@@ -7,17 +7,23 @@ end
 local function approx(actual, expected)
     assert(actual and math.abs(actual - expected) < 0.00001, tostring(actual) .. " ~= " .. expected)
 end
-local current, locale, cached, modernCalls, legacyCalls, loads
+local current, locale, cached, modernCalls, legacyCalls, loads, tooltipCalls
+local weaponSlots = { INVTYPE_WEAPON=true, INVTYPE_WEAPONMAINHAND=true, INVTYPE_WEAPONOFFHAND=true,
+    INVTYPE_2HWEAPON=true, INVTYPE_RANGED=true, INVTYPE_RANGEDRIGHT=true, INVTYPE_THROWN=true }
 local function newReader(item)
-    current, locale, cached, modernCalls, legacyCalls, loads = item, "enUS", true, 0, 0, 0
+    current, locale, cached, modernCalls, legacyCalls, loads, tooltipCalls = item, "enUS", true, 0, 0, 0, 0
     GetBuildInfo = function() return "1.60.0", "12345", "today", 16000 end
     UnitLevel = function() return 60 end
     GetLocale = function() return locale end
     GetItemInfo = function(link)
         if not cached then return nil end
-        return current.name or "Test Item", link, 4, 60, 60, "Armor", "Plate", 1,
-            current.equipLoc or "INVTYPE_HEAD", nil, nil, current.classID, current.subclassID
+        local equipLoc = current.equipLoc or "INVTYPE_HEAD"
+        local classID = current.classID or (weaponSlots[equipLoc] and 2 or 4)
+        local subclassID = current.subclassID or (classID == 2 and 7 or 4)
+        return current.name or "Test Item", link, 4, 60, 60, classID == 2 and "Weapon" or "Armor",
+            classID == 2 and "Sword" or "Plate", 1, equipLoc, nil, nil, classID, subclassID
     end
+    GetItemInfoInstant = nil
     GetItemStats = function() legacyCalls = legacyCalls + 1; return current.legacy end
     C_Item = {
         IsItemDataCachedByID = function() return cached end,
@@ -26,6 +32,7 @@ local function newReader(item)
     }
     C_TooltipInfo = {
         GetHyperlink = function()
+            tooltipCalls = tooltipCalls + 1
             if not current.lines then return nil end
             local lines = {}
             for _, text in ipairs(current.lines) do lines[#lines + 1] = { leftText = text } end
@@ -325,7 +332,7 @@ for _, sample in ipairs(foreverCases) do
     equal(next(item.unresolvedStats), nil)
     equal(FW:GetIssueReport().itemCount, 0)
     equal(FW:GetItem("item:" .. sample.id .. ":8481"), item, "resolved item caches")
-    equal(item.parserVersion, 5, "old persisted parser results receive a new key")
+    equal(item.parserVersion, 6, "old persisted parser results receive a new key")
 end
 
 FW = newReader({ raw = { RESISTANCE0_NAME = 141, ITEM_MOD_STAMINA_SHORT = 4 },
@@ -403,7 +410,7 @@ equal(FW.DB.cache.items[item.key],nil,"missing ammo DPS is never cached as a com
 
 FW = newReader({raw={},classID=6,subclassID=2,equipLoc="INVTYPE_AMMO",lines={"Arrow","Adds 7.5 damage per second"}})
 local ammoProfile = assert(FW:CreateProfile("Cache migration",{rangedDps=2,dps=100}))
-local oldAmmoKey = FW:ItemKey("item:511"):gsub("^5|","4|")
+local oldAmmoKey = FW:ItemKey("item:511"):gsub("^6|","4|")
 FW.DB.cache.items[oldAmmoKey] = {key=oldAmmoKey,stats={dps=7.5},equipLoc="INVTYPE_AMMO"}
 FW.DB.cache.scores[oldAmmoKey] = {[ammoProfile.id]={revision=ammoProfile.revision,score=750}}
 equal(FW:GetScore("item:511",ammoProfile),15,"parser update ignores ammo previously cached as melee DPS")
@@ -419,5 +426,77 @@ local apiAmmoProfile = assert(FW:CreateProfile("API ammo",{rangedDps=2,rangedSpe
 local apiAmmoScore, _, apiAmmoNote = FW:GetScore(item.link,apiAmmoProfile)
 equal(apiAmmoScore,15)
 assert(not apiAmmoNote:find("speed",1,true),"missing ammo tooltip must not invent a speed warning")
+
+-- Excluded item types stop at metadata. Positive API/tooltip stats on a recipe,
+-- crafting output or malformed equipment category must never trigger parsing.
+for index, sample in ipairs({
+    {name="Recipe: Mithril Shield Spike",classID=9,subclassID=4,equipLoc=""},
+    {name="Mithril Shield Spike",classID=7,subclassID=1,equipLoc=""},
+    {name="Flint and Tinder",classID=15,subclassID=0,equipLoc=""},
+    {name="Strength Potion",classID=0,subclassID=1,equipLoc=""},
+    {name="Quest Prop",classID=12,subclassID=0,equipLoc="INVTYPE_HOLDABLE"},
+    {name="Unsupported Armor",classID=4,subclassID=99,equipLoc="INVTYPE_HEAD"},
+    {name="Unsupported Weapon",classID=2,subclassID=99,equipLoc="INVTYPE_WEAPON"},
+    {name="Armor With Invalid Slot",classID=4,subclassID=4,equipLoc="INVTYPE_UNKNOWN"},
+    {name="Bag",classID=1,subclassID=0,equipLoc="INVTYPE_BAG"},
+}) do
+    sample.raw = {ITEM_MOD_STRENGTH_SHORT=99}
+    sample.lines = {sample.name,"+99 Strength","Equip: Grants 3 Mystery Flux."}
+    FW = newReader(sample)
+    local link = "item:" .. (600+index) .. ":42:0"
+    local raw = assert(FW:GetRawItemStats(link))
+    equal(raw.ready,true); equal(raw.excluded,true,sample.name .. " is excluded from the raw reader")
+    equal(next(raw.raw),nil); equal(#raw.tooltipLines,0); equal(#raw.tooltipDetails,0)
+    equal(modernCalls,0); equal(legacyCalls,0); equal(tooltipCalls,0,
+        sample.name .. " never scans a tooltip")
+    item = assert(FW:GetItem(link))
+    equal(next(item.stats),nil); equal(item.partial,false); equal(#item.warnings,0)
+    local profile = assert(FW:CreateProfile("No non-gear values",{strength=1}))
+    local total, record, status = FW:GetScore(link,profile)
+    equal(total,nil); equal(record.name,sample.name); equal(status,"excluded")
+    -- Simulate a validly keyed SavedVariables record from earlier code that
+    -- already contains a positive score; classification still wins over it.
+    item.stats = {strength=99}
+    FW.DB.cache.items[item.key] = item
+    FW.DB.cache.scores[item.key] = {[profile.id]={revision=profile.revision,score=99}}
+    total, record, status = FW:GetScore(link,profile,true)
+    equal(total,nil); equal(record,item); equal(status,"excluded",
+        "cached non-gear cannot score through the equipped-baseline bypass")
+    equal(FW:GetBaseScore(link,profile),nil,"non-gear Base scores stay excluded")
+    equal(modernCalls,0); equal(legacyCalls,0); equal(tooltipCalls,0,
+        sample.name .. " never reads API stats or tooltips, including cached/Base paths")
+end
+
+-- Profile exclusions also stop unread candidates before stat/tooltip APIs,
+-- without placing an empty record in the shared item cache. Other profiles and
+-- equipped baselines must still read the real stats from the same variants.
+FW = newReader({name="Unread plate helmet",classID=4,subclassID=4,equipLoc="INVTYPE_HEAD",
+    raw={ITEM_MOD_STRENGTH_SHORT=99},lines={"Unread plate helmet","+99 Strength"}})
+local unchecked = assert(FW:CreateProfile("Plate unchecked",{strength=1}))
+local included = assert(FW:CreateProfile("Plate included",{strength=1}))
+assert(FW:UpdateProfile(unchecked.id,{itemFilters={armor={["4"]=false}}}))
+local unreadLink, unreadBase = "item:790:42:0", "item:790:0:0"
+local total, metadata, status = FW:GetScore(unreadLink,unchecked)
+equal(total,nil); equal(status,"excluded"); equal(next(metadata.stats),nil)
+equal(modernCalls,0); equal(legacyCalls,0); equal(tooltipCalls,0,
+    "unchecked unread candidates avoid stat APIs and tooltip scans")
+equal(FW.DB.cache.items[FW:ItemKey(unreadLink)],nil,"profile-excluded metadata is never cached as an empty shared item")
+equal(FW.DB.cache.scores[FW:ItemKey(unreadLink)],nil)
+total, metadata, status = FW:GetBaseScore(unreadLink,unchecked)
+equal(total,nil); equal(status,"excluded")
+equal(modernCalls,0); equal(tooltipCalls,0,"unchecked fresh Base variant also stops before parsing")
+equal(FW.DB.cache.items[FW:ItemKey(unreadBase)],nil)
+equal(FW:GetScore(unreadLink,included),99,"another profile reads actual stats after an unread exclusion")
+equal(modernCalls,1); equal(tooltipCalls,1)
+equal(FW.DB.cache.items[FW:ItemKey(unreadLink)].stats.strength,99)
+equal(FW:GetScore(unreadLink,unchecked,true),99,"equipped baseline bypass uses the real shared item stats")
+local freshBaselineLink = "item:791:43:0"
+equal(FW:GetScore(freshBaselineLink,unchecked,true),99,"uncached equipped baseline bypass also reads real stats")
+equal(modernCalls,2); equal(tooltipCalls,2)
+equal(FW:GetBaseScore(freshBaselineLink,unchecked),nil)
+equal(modernCalls,2); equal(tooltipCalls,2,"unchecked second Base variant does not scan")
+equal(FW.DB.cache.items[FW:ItemKey("item:791:0:0")],nil)
+equal(FW:GetBaseScore(freshBaselineLink,included),99,"included profile can later parse a previously excluded Base variant")
+equal(modernCalls,3); equal(tooltipCalls,3)
 
 print("Items tests passed")

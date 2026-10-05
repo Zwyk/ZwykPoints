@@ -16,17 +16,30 @@ local gearEquipLocations = {
     INVTYPE_SHIELD=true, INVTYPE_HOLDABLE=true, INVTYPE_RANGED=true,
     INVTYPE_RANGEDRIGHT=true, INVTYPE_THROWN=true, INVTYPE_RELIC=true, INVTYPE_TABARD=true,
 }
+local weaponEquipLocations = {INVTYPE_WEAPON=true, INVTYPE_WEAPONMAINHAND=true,
+    INVTYPE_WEAPONOFFHAND=true, INVTYPE_2HWEAPON=true, INVTYPE_RANGED=true,
+    INVTYPE_RANGEDRIGHT=true, INVTYPE_THROWN=true}
+local supportedTypes = {[2]={}, [4]={}}
 
 function FW:IsGearItem(record)
     if not record then return nil, "Item equipment data is not available yet." end
-    if record.classID ~= nil and record.classID ~= 2 and record.classID ~= 4 and record.classID ~= 6 then return false end
     local equipLoc = record.equipLoc
+    local classID, subclassID = record.classID, record.subclassID
+    if issecretvalue then
+        if issecretvalue(classID) then classID = nil end
+        if issecretvalue(subclassID) then subclassID = nil end
+    end
+    if classID ~= nil and not supportedTypes[classID] and classID ~= 6 then return false end
     if (issecretvalue and issecretvalue(equipLoc)) or type(equipLoc) ~= "string" then
         return nil, "Item equipment data is not available yet."
     end
-    if equipLoc == "INVTYPE_AMMO" then return record.classID == nil or record.classID == 6 end
-    if record.classID == 6 then return false end
-    return gearEquipLocations[equipLoc] == true
+    if not gearEquipLocations[equipLoc] and equipLoc ~= "INVTYPE_AMMO" then return false end
+    if classID == nil then return nil, "Item type data is not available yet." end
+    if equipLoc == "INVTYPE_AMMO" then return classID == 6 end
+    if classID == 6 then return false end
+    if (classID == 2) ~= (weaponEquipLocations[equipLoc] == true) then return false end
+    if subclassID == nil then return nil, "Item subtype data is not available yet." end
+    return supportedTypes[classID][subclassID] == true
 end
 
 -- Stable client subclass IDs keep saved filters independent of locale.
@@ -50,6 +63,9 @@ FW.ItemFilterGroups = {
         {key="10",label="Sigils"}, {key="11",label="Relics"},
     }},
 }
+for _, group in ipairs(FW.ItemFilterGroups) do
+    for _, itemType in ipairs(group.types) do supportedTypes[group.classID][tonumber(itemType.key)] = true end
+end
 
 local function finite(value)
     return type(value) == "number" and value == value and value ~= math.huge and value ~= -math.huge
@@ -109,7 +125,7 @@ local function itemFiltersEqual(left, right)
     return true
 end
 
-function FW:IsItemAllowed(record, profile)
+function FW:IsItemAllowed(record, profile, typeOnly)
     local filters = profile.itemFilters
     if not filters then return true end
     local function hasExclusions(group)
@@ -122,11 +138,12 @@ function FW:IsItemAllowed(record, profile)
         return nil, "Item type data is not available yet."
     end
     if group then
-        if record.subclassID == nil and hasExclusions(group) then
+        if record.subclassID == nil then
             return nil, "Item subtype data is not available yet."
         end
-        if group[tostring(record.subclassID)] == false then return false end
+        if group[tostring(record.subclassID)] ~= true then return false end
     end
+    if typeOnly then return true end
     if filters.includeOtherClasses == false then
         local allowed = record.allowedClasses
         if allowed then
@@ -651,7 +668,7 @@ function FW:GetScore(link, profile, ignoreFilters)
     self:Initialize()
     if type(profile) == "string" then profile = self.DB.profiles[profile] end
     if type(profile) ~= "table" or not self.DB.profiles[profile.id] then return nil, "Profile not found." end
-    local record, errorMessage = self:GetItem(link)
+    local record, errorMessage = self:GetItem(link, not ignoreFilters and profile or nil)
     if not record then return nil, errorMessage or "Item data is not available yet." end
     if type(record.key) ~= "string" or type(record.stats) ~= "table" then return nil, "Item data is incomplete." end
     local gear, gearError = self:IsGearItem(record)

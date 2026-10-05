@@ -169,7 +169,10 @@ function FW:GetItem(link)
     local cached = self.DB.cache.items[link]
     if cached then return cached end
     itemReads = itemReads + 1
-    if records[link] then records[link].equipLoc = "INVTYPE_HEAD" end
+    if records[link] then
+        records[link].equipLoc = "INVTYPE_HEAD"
+        records[link].classID, records[link].subclassID = 4, 4
+    end
     return records[link], records[link] and nil or "Item is loading."
 end
 local baseScoreStats = FW.ScoreStats
