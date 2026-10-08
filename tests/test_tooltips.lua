@@ -696,4 +696,180 @@ FW:RefreshTooltips()
 assert(ignoredRefreshes==0 and validWrapped:IsShown(), "a transitioned recipe is removed from item refresh watching")
 GameTooltip=validWrapped
 assert(FW:GetHoveredItemLink()==nil, "a reused tooltip no longer exposes the old item as hovered")
+
+-- Average Use starts from the unenchanted Base score. Display relevance uses
+-- Base, even when Base's own row was suppressed against the regular score.
+for _, tip in ipairs(testTooltips) do tip:Hide() end
+profiles={{id="one",name="Melee",revision=1,color={r=.8,g=.2,b=.1}}}
+FW.DB.options.debugUnknownStats=false
+FW.DB.options.showComparisons=true
+local averageFull, averageBase, averageValue
+local averageError, averageMetadata
+local averageCalls={compare=0,score=0}
+FW.CompareItem=function() return averageFull end
+FW.CompareBaseItem=function() return averageBase end
+FW.GetScore=function() return averageFull.score,averageFull.record end
+FW.GetBaseScore=function() return averageBase.score,averageBase.record end
+FW.CompareAverageUseItem=function(_,link)
+    averageCalls.compare=averageCalls.compare+1; averageCalls.link=link
+    return averageValue,averageError
+end
+FW.GetAverageUseScore=function(_,link,_,ignoreFilters)
+    averageCalls.score=averageCalls.score+1; averageCalls.link=link; averageCalls.ignoreFilters=ignoreFilters
+    return averageValue and averageValue.score,averageValue and averageValue.record or averageError,nil,averageMetadata
+end
+local function hasAverage(tip)
+    for _, line in ipairs(tip.lines) do
+        if line.text=="  Average use" or line.text=="  Average use: unavailable" then return line end
+    end
+end
+local function noteCount(tip,text)
+    local count=0
+    for _,line in ipairs(tip.lines) do if line.text=="  " .. text then count=count+1 end end
+    return count
+end
+local assumption="Average use assumes use on cooldown."
+local function decorateAverage(name,equipped)
+    local tip=tooltip(name,variant); tip.equipped=equipped
+    postCall(tip,{hyperlink=variant})
+    return tip
+end
+averageFull=compared(100,10,11.111)
+averageBase=compared(80,5,6.667)
+averageValue=compared(80,5,6.667)
+averageValue.hasAverageUse=false
+local noAverage=decorateAverage("NoAverageUse")
+assert(#noAverage.lines==3 and not hasAverage(noAverage) and noteCount(noAverage,assumption)==0, "no Use effect keeps regular and Base rows without a redundant average")
+averageValue.hasAverageUse=true; averageValue.averageUseGain=0
+local zeroWeightedAverage=decorateAverage("ZeroWeightedAverageUse")
+assert(not hasAverage(zeroWeightedAverage) and noteCount(zeroWeightedAverage,assumption)==0, "a parsed zero-weight Use effect does not add duplicate values or an assumption")
+averageValue=compared(100,10,11.111)
+averageValue.hasAverageUse=true; averageValue.averageUseGain=20
+local equalFullAverage=decorateAverage("AverageEqualsFull")
+assert(#equalFullAverage.lines==5 and equalFullAverage.lines[4].text=="  Average use" and noteCount(equalFullAverage,assumption)==1, "Average equals Full still appears when its Base values differ")
+assert(equalFullAverage.lines[2].text=="Melee" and equalFullAverage.lines[3].text=="  Base", "Full, Base and Average use retain their row order")
+assert(equalFullAverage.lines[4].right:find("100.00",1,true) and equalFullAverage.lines[4].right:find(":10:10:",1,true), "Average comparisons use the smaller arrow texture")
+assert(math.abs(AverageEqualsFullTextLeft4.size-10.2)<1e-9 and math.abs(AverageEqualsFullTextRight4.size-10.2)<1e-9, "Average use has the same smaller font as Base")
+assert(AverageEqualsFullTextLeft2.size==12 and AverageEqualsFullTextLeft5.size==12, "regular scores and the assumption note retain native font size")
+
+averageValue=compared(85,6,7.5)
+averageValue.hasAverageUse=true; averageValue.averageUseGain=5
+local unenchantedAverage=decorateAverage("UnenchantedAverage")
+assert(unenchantedAverage.lines[4].right:find("85.00",1,true) and not unenchantedAverage.lines[4].right:find("105.00",1,true), "Average uses the Base-derived API score rather than adding Use gain to the enchanted score")
+assert(averageCalls.link==variant, "Average readers receive the exact item variant for unenchanted extraction")
+local averageLineCount=#unenchantedAverage.lines
+local averageCompareCount=averageCalls.compare
+postCall(unenchantedAverage,{hyperlink=variant})
+unenchantedAverage:Fire("OnTooltipSetItem")
+assert(#unenchantedAverage.lines==averageLineCount and averageCalls.compare==averageCompareCount, "modern and legacy callbacks do not duplicate Average rows or reads")
+
+averageFull=compared(80,5,6.667)
+averageBase=compared(80,5,6.667)
+averageValue=compared(80,8,10)
+averageValue.hasAverageUse=false; averageValue.averageUseGain=0
+local baselineAverage=decorateAverage("BaselineOnlyAverage")
+assert(#baselineAverage.lines==4 and not hasBase(baselineAverage) and hasAverage(baselineAverage), "equipped Use effects can change comparison relevance without a candidate Use effect")
+assert(baselineAverage.lines[3].right:find("80.00",1,true) and baselineAverage.lines[3].right:find("+8.00 (+10.0%)",1,true), "an equal candidate score retains the differing averaged baseline delta")
+averageBase={score=80,record={stats={}},comparisons={
+    {delta=5,percent=6.667,status="upgrade"}, {delta=0,percent=0,status="equal"},
+}}
+averageValue={score=80,record={stats={}},hasAverageUse=false,averageUseGain=0,comparisons={
+    {delta=5,percent=6.667,status="upgrade"}, {delta=-10,percent=-11.111,status="downgrade"},
+}}
+local secondAverage=decorateAverage("SecondSlotAverage")
+assert(hasAverage(secondAverage).right:find(" | ",1,true) and hasAverage(secondAverage).right:find("-10.00 (-11.1%)",1,true), "the second replacement comparison can make Average use relevant")
+
+averageFull=compared(100,10,11.111)
+averageBase=compared(80.001,5.001,6.641)
+averageValue=compared(80.004,5.004,6.644)
+averageValue.hasAverageUse=true; averageValue.averageUseGain=.003
+local roundedAverage=decorateAverage("RoundedAverageUse")
+assert(not hasAverage(roundedAverage) and noteCount(roundedAverage,assumption)==0, "identical formatted score and comparisons hide Average use despite different raw values and arrow sizes")
+averageBase=compared(80,5,6.667)
+averageValue=compared(79,5,6.667)
+averageValue.hasAverageUse=true; averageValue.averageUseGain=-1
+local negativeAverage=decorateAverage("NegativeAverageUse")
+assert(hasAverage(negativeAverage).right:find("79.00",1,true), "a negative weighted Use gain still retains a differing average")
+
+-- Incomplete candidates and baselines are never shown as a confident numeric
+-- average, even when the API returns a recognized subtotal alongside warnings.
+averageValue={score=85,record={stats={}},comparisons={{baseline=80}}}
+averageValue.hasAverageUse=true; averageValue.averageUseIncomplete=true
+averageValue.averageUseWarnings={"Unsupported Use effect."}
+local incompleteAverage=decorateAverage("IncompleteAverageUse")
+assert(hasAverage(incompleteAverage).text=="  Average use: unavailable" and hasAverage(incompleteAverage).right==nil, "unsupported Use effects replace the numeric row with unavailable")
+assert(incompleteAverage.lines[2].right:find("100.00",1,true) and incompleteAverage.lines[3].right:find("80.00",1,true), "an incomplete average preserves regular and Base scores")
+assert(noteCount(incompleteAverage,"Unsupported Use effect.")==1 and noteCount(incompleteAverage,assumption)==0, "an incomplete estimate gives its warning without a numeric assumption")
+assert(math.abs(IncompleteAverageUseTextLeft4.size-10.2)<1e-9, "the unavailable row also uses the smaller font")
+averageValue={score=80,record={stats={}},hasAverageUse=true,averageUseIncomplete=true,
+    averageUseWarnings={"Equipped Use effect unavailable."},comparisons={{error="Equipped Use effect unavailable."}}}
+local incompleteBaseline=decorateAverage("IncompleteAverageBaseline")
+assert(hasAverage(incompleteBaseline).right==nil and noteCount(incompleteBaseline,"Equipped Use effect unavailable.")==1, "an incomplete equipped effect hides all Average deltas and deduplicates its warning")
+
+-- Score-only routes must retain the metadata fourth return and avoid the
+-- comparison API. They still use the same Base relevance and uncertainty rule.
+FW.DB.options.showComparisons=false
+averageValue=compared(85,6,7.5)
+averageMetadata={hasAverageUse=true,averageUseGain=5}
+local beforeAverageCompare=averageCalls.compare
+local scoreAverage=decorateAverage("ScoreOnlyAverage")
+assert(hasAverage(scoreAverage).right=="85.00" and averageCalls.compare==beforeAverageCompare and averageCalls.score==1, "disabled comparisons use GetAverageUseScore and its numeric score")
+assert(averageCalls.ignoreFilters==nil, "Average score rows retain profile item filters")
+averageMetadata={hasAverageUse=true,averageUseIncomplete=true,averageUseWarnings={"Secondary unit unavailable."}}
+local incompleteScoreAverage=decorateAverage("IncompleteScoreAverage")
+assert(hasAverage(incompleteScoreAverage).right==nil and noteCount(incompleteScoreAverage,"Secondary unit unavailable.")==1, "score-only metadata prevents an incomplete numeric estimate")
+averageValue=nil; averageError="Average item data loading"
+local pendingAverage=decorateAverage("PendingScoreAverage")
+assert(hasAverage(pendingAverage).text=="  Average use: unavailable", "known incomplete Use metadata is retained even when no score is ready")
+averageError=nil
+averageValue=compared(85,6,7.5)
+averageMetadata={hasAverageUse=true,averageUseGain=5}
+FW.DB.options.showComparisons=true
+local equippedAverage=decorateAverage("EquippedAverageUse",true)
+local shoppingAverage=decorateAverage("ShoppingTooltipAverageUse")
+assert(hasAverage(equippedAverage).right=="85.00" and hasAverage(shoppingAverage).right=="85.00" and averageCalls.compare==beforeAverageCompare, "equipped and shopping tooltips use the score-only Average API")
+
+local savedAverageCompare=FW.CompareAverageUseItem
+FW.CompareAverageUseItem=nil
+local beforeOptionalScore=averageCalls.score
+local optionalAverage=decorateAverage("OptionalAverageComparisonAPI")
+assert(not hasAverage(optionalAverage) and averageCalls.score==beforeOptionalScore, "a missing comparison method skips Average without calling the score-only method")
+FW.CompareAverageUseItem=savedAverageCompare
+local savedAverageScore=FW.GetAverageUseScore
+FW.GetAverageUseScore=nil
+local optionalScoreAverage=decorateAverage("OptionalAverageScoreAPI",true)
+assert(not hasAverage(optionalScoreAverage) and averageCalls.score==beforeOptionalScore, "a missing score-only method skips Average without calling the comparison method")
+FW.GetAverageUseScore=savedAverageScore
+averageFull={excluded=true,record={stats={}},comparisons={}}
+local beforeExcludedAverage=averageCalls.compare
+local excludedAverage=decorateAverage("ExcludedAverageUse")
+assert(#excludedAverage.lines==0 and averageCalls.compare==beforeExcludedAverage, "an excluded full result never requests an Average score")
+
+averageFull=compared(100,10,11.111)
+averageBase=compared(80,5,6.667)
+averageValue=compared(85,6,7.5)
+averageValue.hasAverageUse=true; averageValue.averageUseGain=5
+profiles={profiles[1],{id="two",name="Caster",revision=1,color={r=.1,g=.3,b=.9}}}
+local multipleAverages=decorateAverage("MultipleAverageProfiles")
+assert(#multipleAverages.lines==8 and noteCount(multipleAverages,assumption)==1, "multiple visible profile averages share one assumption note")
+profiles={profiles[1]}
+
+-- Clear, hide and native refresh restore fonts when Average rows vanish, even
+-- when the old Average FontString is reused for a regular note or native line.
+for _, tip in ipairs(testTooltips) do tip:Hide() end
+local averageRefresh=decorateAverage("AverageUseRefresh")
+function averageRefresh:RefreshData() self:Clear(); postCall(self,{hyperlink=self.link}) end
+averageValue=compared(80,5,6.667)
+FW.equipmentRevision=FW.equipmentRevision+1
+FW:RefreshTooltips()
+assert(#averageRefresh.lines==3 and not hasAverage(averageRefresh) and AverageUseRefreshTextLeft4.size==12 and AverageUseRefreshTextRight4.size==12, "refresh removes a redundant Average row and restores its font")
+averageRefresh:Clear()
+for _,text in ipairs({"Native one","Native two","Native three","Native four"}) do averageRefresh:AddLine(text) end
+assert(AverageUseRefreshTextLeft4.size==12, "native content can reuse a former Average row at normal size")
+averageRefresh:Clear()
+averageValue=compared(85,6,7.5)
+postCall(averageRefresh,{hyperlink=variant})
+assert(math.abs(AverageUseRefreshTextLeft4.size-10.2)<1e-9, "a returning Average row shrinks once")
+averageRefresh:Hide()
+assert(AverageUseRefreshTextLeft3.size==12 and AverageUseRefreshTextLeft4.size==12 and averageRefresh.fwBaseFonts==nil, "hiding restores both smaller Base and Average rows")
 print("Tooltip tests passed")

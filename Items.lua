@@ -1,7 +1,8 @@
 local _, FW = ...
-local MAX_ITEMS, PARSER_VERSION = 2000, 6
+local MAX_ITEMS, PARSER_VERSION = 2000, 7
 local recentItems, recentCount, recentCache, recentEquipment = {}, 0, nil, nil
 local metadataRetries = setmetatable({}, {__mode="k"})
+local onUseRetries = setmetatable({}, {__mode="k"})
 local dataWaits = {}
 
 -- Partial/excluded reads are reusable briefly, but never SavedVariables data.
@@ -11,15 +12,20 @@ function FW:InvalidateRecentItemReads(itemID)
         for key, entry in pairs(recentItems) do
             if entry.record.itemID == itemID then
                 metadataRetries[entry.record] = nil
+                onUseRetries[entry.record] = nil
                 recentItems[key], recentCount = nil, recentCount - 1
             end
         end
         for record in pairs(metadataRetries) do
             if record.itemID == itemID then metadataRetries[record] = nil end
         end
+        for record in pairs(onUseRetries) do
+            if record.itemID == itemID then onUseRetries[record] = nil end
+        end
     else
         recentItems, recentCount = {}, 0
         metadataRetries = setmetatable({}, {__mode="k"})
+        onUseRetries = setmetatable({}, {__mode="k"})
         dataWaits = {}
     end
 end
@@ -642,6 +648,223 @@ local function unrecognized(record, line, index, reason)
     record.partial = true
 end
 
+local function positive(value)
+    return value and value > 0 and value < math.huge
+end
+
+local timeUnits = {
+    s=1, sec=1, secs=1, second=1, seconds=1, seconde=1, secondes=1,
+    min=60, mins=60, minute=60, minutes=60,
+    h=3600, hr=3600, hrs=3600, hour=3600, hours=3600, heure=3600, heures=3600,
+}
+local function useTime(text)
+    local remaining, total, previousScale = clean(text), 0, math.huge
+    while remaining ~= "" do
+        local value, unit, rest = remaining:match("^([%d%.,]+)%s*([%a]+)%.?%s*(.*)$")
+        value = number(value)
+        local scale = unit and timeUnits[unit]
+        if not value or value < 0 or value >= math.huge or not scale or scale >= previousScale then return end
+        total, previousScale, remaining = total+value*scale, scale, rest
+        if total >= math.huge then return end
+    end
+    if positive(total) then return total end
+end
+
+local function useCooldown(text)
+    text = lower(clean(text)):gsub("%.$", "")
+    for _, format in ipairs({{"ITEM_COOLDOWN_TOTAL_SEC",1},{"ITEM_COOLDOWN_TOTAL_MIN",60},
+        {"ITEM_COOLDOWN_TOTAL_HOUR",3600},{"ITEM_COOLDOWN_TOTAL_HOURS",3600}}) do
+        local template = lower(clean(_G[format[1]]))
+        local first, last = template:find("%%[%d%$%.]*[dfgs]")
+        if first then
+            local value = number(text:match("^" .. escape(template:sub(1,first-1))
+                .. "([%d%.,]+)" .. escape(template:sub(last+1)) .. "$"))
+            if positive(value) and positive(value*format[2]) then return value*format[2] end
+        end
+    end
+    -- Remaining-cooldown strings such as "Temps de recharge : 2 min" are
+    -- dynamic. Only the parenthesized full-cooldown grammar is a fallback.
+    text = text:match("^%((.-)%)$")
+    if not text then return end
+    text = text:gsub("%.$", "")
+    local time = text:match("^(.-)%s+cooldown$") or text:match("^(.-)%s+de recharge$")
+    return time and useTime(time)
+end
+
+local function useContent(text)
+    text = lower(clean(text)):gsub("’", "'")
+    return text:match("^use%s*:%s*(.*)$") or text:match("^utiliser%s*:%s*(.*)$")
+        or text:match("^utilisation%s*:%s*(.*)$")
+end
+
+local function unsafeUse(content)
+    return content:find("^deals ") or content:find("^heals ") or content:find("^restores ")
+        or content:find("^inflige ") or content:find("^soigne ") or content:find("^rend ")
+        or content:find("stack") or content:find("cumul") or content:find("when ")
+        or content:find("whenever ") or content:find("while ") or content:find("chance") and content:find("to gain")
+        or content:find("has a chance") or content:find("lorsque ") or content:find("quand ")
+        or content:find("si vous ") or content:find("en forme ") or content:find("%% of ")
+        or content:find("%% de ") or content:find("%f[%a]charges?%f[^%a]")
+end
+
+-- Only complete, explicit stat buffs are supported. Restoration/damage bursts,
+-- stacks and conditional effects are not stat amounts and cannot be averaged.
+local function useValues(content)
+    local stats, percentages, ratings = {}, {}, {}
+    local value = number(content:match("^increases spell power by ([%d%.,]+)$"))
+        or number(content:match("^increases your spell power by ([%d%.,]+)$"))
+        or number(content:match("^augmente la puissance des sorts de ([%d%.,]+)$"))
+        or number(content:match("^augmente votre puissance des sorts de ([%d%.,]+)$"))
+        or number(content:match("^increases damage and healing by up to ([%d%.,]+)$"))
+        or number(content:match("^increases damage and healing done by magical spells and effects by up to ([%d%.,]+)$"))
+        or number(content:match("^augmente les dégâts et les soins produits par les sorts et effets magiques de ([%d%.,]+) au maximum$"))
+    if positive(value) then stats.spellDamage, stats.healing = value, value; return stats, percentages, ratings, value end
+    value = number(content:match("^increases the block value of your shield by ([%d%.,]+)$"))
+        or number(content:match("^augmente la valeur de blocage de votre bouclier de ([%d%.,]+)$"))
+    if positive(value) then stats.blockValueBonus = value; return stats, percentages, ratings, value end
+    for school, french in pairs(schools) do
+        value = number(content:match("^increases damage done by " .. school .. " spells and effects by up to ([%d%.,]+)$"))
+            or number(content:match("^increases " .. school .. " spell damage by up to ([%d%.,]+)$"))
+            or number(content:match("^increases " .. school .. " spell damage by ([%d%.,]+)$"))
+            or number(content:match("^augmente les dégâts des sorts de " .. french .. " de ([%d%.,]+) au maximum$"))
+        if positive(value) then stats[school .. "Damage"] = value; return stats, percentages, ratings, value end
+    end
+    value = number(content:match("^increases healing done by spells and effects by up to ([%d%.,]+)$"))
+        or number(content:match("^increases damage done by magical spells and effects by up to ([%d%.,]+)$"))
+        or number(content:match("^augmente les soins prodigués par les sorts et effets de ([%d%.,]+) au maximum$"))
+        or number(content:match("^augmente les dégâts infligés par les sorts et effets magiques de ([%d%.,]+) au maximum$"))
+    if positive(value) then
+        stats[(content:find("^increases healing") or content:find("^augmente les soins")) and "healing" or "spellDamage"] = value
+        return stats, percentages, ratings, value
+    end
+    local label, amount = content:match("^increases%s+(.+)%s+by%s+([%d%.,]+%%?)$")
+    if not label then label, amount = content:match("^improves%s+(.+)%s+by%s+([%d%.,]+%%?)$") end
+    if not label then label, amount = content:match("^augmente%s+(.+)%s+de%s+([%d%.,]+%%?)$") end
+    if not label then label, amount = content:match("^améliore%s+(.+)%s+de%s+([%d%.,]+%%?)$") end
+    if label then
+        label = label:gsub("^your%s+", ""):gsub("^the%s+", ""):gsub("^votre%s+", "")
+            :gsub("^vos%s+", ""):gsub("^la%s+", ""):gsub("^le%s+", ""):gsub("^les%s+", "")
+        content = label .. " +" .. amount
+    end
+    value = directValue(content,"all stats",false) or directValue(content,"toutes les caractéristiques",false)
+    if positive(value) then
+        for _, key in ipairs({"strength","agility","stamina","intellect","spirit"}) do stats[key] = value end
+        return stats,percentages,ratings,value
+    end
+    value = directValue(content,"defense rating",false) or directValue(content,"score de défense",false)
+    if positive(value) then ratings.defense=value; return stats,percentages,ratings,value end
+    for _, alias in ipairs({{"hit","chance to hit"},{"crit","chance to get a critical strike"},
+        {"dodge","chance to dodge"},{"parry","chance to parry"},{"block","chance to block"},
+        {"haste","attack speed"},{"haste","vitesse d'attaque"}}) do
+        value = directValue(content,alias[2],true)
+        if positive(value) then percentages[alias[1]]=value; return stats,percentages,ratings,value end
+    end
+    for key, list in pairs(getLabels()) do
+        local definition = FW.StatByKey[key]
+        for _, statLabel in ipairs(list) do
+            local rating = statLabel:find("rating", 1, true) or statLabel:find("score", 1, true)
+            local percent = definition.secondary and key ~= "defense" and not rating
+            value = directValue(content, statLabel:gsub("’", "'"), percent)
+            if positive(value) then
+                local target = not definition.secondary and stats or rating and ratings or percentages
+                local stat = key == "armor" and "armorBonus" or key == "blockValue" and "blockValueBonus" or key
+                target[stat] = value
+                return stats, percentages, ratings, value
+            end
+        end
+    end
+end
+
+local function scanUse(record, details, readable)
+    record.onUseStats, record.onUsePercentStats, record.onUseRatingStats = {}, {}, {}
+    record.onUseEffects, record.onUseUnsupported, record.onUseRetryable = {}, {}, false
+    local now = GetTime and GetTime()
+    if now then onUseRetries[record] = now+1 end
+    local usedCooldowns, setSection = {}, false
+    local function rowText(row)
+        return row and {clean(row.leftText), clean(row.rightText)} or {}
+    end
+    local function adjacentCooldown(index)
+        if usedCooldowns[index] then return end
+        local row = details[index]
+        if not row then return end
+        local values = rowText(row)
+        local text = values[1] ~= "" and values[1] or values[2]
+        if values[1] ~= "" and values[2] ~= "" and values[1] ~= values[2] then return end
+        return useCooldown(text), index
+    end
+    for rowIndex, row in ipairs(details) do
+        local values = rowText(row)
+        local function unreadable(value)
+            return (issecretvalue and issecretvalue(value)) or (value ~= nil and type(value) ~= "string")
+        end
+        if unreadable(row.leftText) or unreadable(row.rightText) then
+            record.onUseRetryable = true
+            record.onUseUnsupported[#record.onUseUnsupported+1] = {text="[Unreadable tooltip line]",
+                index=row.index or rowIndex,reason="On-use tooltip text could not be read completely."}
+        end
+        if lower(values[1]):find("%(%d+/%d+%)") then setSection = true end
+        for side, text in ipairs(values) do
+            if rowIndex > 1 and not (side == 2 and text == values[1]) then
+                local content = useContent(text)
+                if content then
+                    local cooldown, cooldownRow
+                    local buff, inline = content:match("^(.-)%s*(%b())%s*%.?$")
+                    if inline then cooldown = useCooldown(inline); if cooldown then content = clean(buff) end end
+                    if not cooldown then cooldown = useCooldown(values[side == 1 and 2 or 1]) end
+                    if not cooldown then cooldown, cooldownRow = adjacentCooldown(rowIndex + 1) end
+                    if cooldownRow and cooldown then usedCooldowns[cooldownRow] = true end
+                    content = content:gsub("%.$", "")
+                    local effect, durationText = content:match("^(.-)%s+for%s*([%d%.,].*)$")
+                    if not effect then effect, durationText = content:match("^(.-)%s+pendant%s*([%d%.,].*)$") end
+                    local duration = durationText and useTime(durationText)
+                    local stats, percentages, ratings, amount
+                    stats, percentages, ratings, amount = useValues(clean(effect or content):gsub("%.$", ""))
+                    local unsafe = unsafeUse(content)
+                    local reason = setSection and "On-use effect appears in a set section."
+                        or unsafe and "On-use effect is not a supported flat stat buff."
+                        or not stats and "On-use effect is not a supported flat stat buff."
+                        or not duration and "A positive on-use duration could not be read."
+                        or not cooldown and "A positive full on-use cooldown could not be read."
+                    if reason then
+                        if not setSection and not unsafe and stats and (not duration or not cooldown) then record.onUseRetryable = true end
+                        record.onUseUnsupported[#record.onUseUnsupported+1] = {text=text,index=row.index or rowIndex,reason=reason}
+                    else
+                        local uptime = duration >= cooldown and 1 or duration / cooldown
+                        record.onUseEffects[#record.onUseEffects+1] = {text=text,index=row.index or rowIndex,
+                            amount=amount,duration=duration,cooldown=cooldown,uptime=uptime,
+                            stats=stats,percentStats=percentages,ratingStats=ratings}
+                        for _, pair in ipairs({{stats,record.onUseStats},{percentages,record.onUsePercentStats},{ratings,record.onUseRatingStats}}) do
+                            for key, value in pairs(pair[1]) do add(pair[2],key,value*uptime) end
+                        end
+                    end
+                end
+            end
+        end
+    end
+    if #details <= 1 then
+        record.onUseRetryable = true
+        record.onUseUnsupported[#record.onUseUnsupported+1] = {text="[Unavailable tooltip data]",
+            reason="On-use tooltip data was not available."}
+    end
+end
+
+function FW:RefreshOnUseItem(record)
+    if not record or not record.onUseRetryable or (issecretvalue and issecretvalue(record.link))
+        or type(record.link) ~= "string" then return false end
+    local now = GetTime and GetTime()
+    if not now or onUseRetries[record] and onUseRetries[record] > now then return false end
+    local lines, source, details, readable = tooltipLines(record.link)
+    scanUse(record,details or {},readable)
+    record.averageUseScores = nil
+    record.onUseRevision = (record.onUseRevision or 0)+1
+    local diagnostic = record.diagnostic or {}
+    diagnostic.tooltipLines, diagnostic.tooltipSource = lines, source
+    diagnostic.tooltipDetails, diagnostic.tooltipReadable = details, readable
+    record.diagnostic = diagnostic
+    return true
+end
+
 local function ammoDps(content)
     local format = lower(clean(_G.ITEM_AMMO_DAMAGE_TEMPLATE)):gsub("%.$", "")
     local first, last = format:find("%%[%d%$%.]*[dfgs]")
@@ -892,6 +1115,7 @@ function FW:GetItem(link, profile)
     if not diagnostic.ready then return nil, "Item data is still loading." end
     local record = { key = key, link = diagnostic.link or link, itemID = diagnostic.itemID,
         equipLoc = diagnostic.equipLoc, stats = {}, percentStats = {}, ratingStats = {},
+        onUseStats = {}, onUsePercentStats = {}, onUseRatingStats = {}, onUseEffects = {}, onUseUnsupported = {},
         classID = diagnostic.classID, subclassID = diagnostic.subclassID,
         allowedClasses = diagnostic.allowedClasses, classRestrictionsKnown = diagnostic.classRestrictionsKnown,
         classRestrictionUnknownNames = diagnostic.classRestrictionUnknownNames,
@@ -973,6 +1197,7 @@ function FW:GetItem(link, profile)
     if record.stats.armor and record.stats.armorBonus then
         record.stats.armor = math.max(0, record.stats.armor - record.stats.armorBonus)
     end
+    scanUse(record, diagnostic.tooltipDetails or {}, diagnostic.tooltipReadable)
     if self.RecordItemIssue then self:RecordItemIssue(record) end
     if not record.partial then
         self.DB.cache.items[key] = record

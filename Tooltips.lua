@@ -216,42 +216,82 @@ function FW:DecorateTooltip(tooltip, data)
     local displayedProfiles, addedSpacer = 0, false
     for _, profile in ipairs(profiles) do
         local r, g, b = profile.color.r, profile.color.g, profile.color.b
-        local function readResult(base)
+        local function readResult(kind)
             if compare then
-                if base then return self:CompareBaseItem(link, profile) end
+                if kind == "Average use" then return self:CompareAverageUseItem(link, profile) end
+                if kind then return self:CompareBaseItem(link, profile) end
                 return self:CompareItem(link, profile)
             end
-            local score, record, detail
-            if base then score, record, detail = self:GetBaseScore(link, profile)
+            local score, record, detail, metadata
+            if kind == "Average use" then score, record, detail, metadata = self:GetAverageUseScore(link, profile)
+            elseif kind then score, record, detail = self:GetBaseScore(link, profile)
             else score, record, detail = self:GetScore(link, profile) end
-            if score ~= nil then return {score=score, record=record, comparisons={}} end
+            if score ~= nil then
+                local value = {score=score, record=record, comparisons={}}
+                for key, field in pairs(metadata or {}) do value[key] = field end
+                return value
+            end
             if detail == "excluded" then return {excluded=true,record=record,comparisons={}} end
-            return nil, record
+            return nil, record, metadata
         end
-        local function addResult(result, errorMessage, base, hideRow)
+        local function addWarnings(warnings)
+            if type(warnings) == "string" then notes[warnings] = true
+            elseif type(warnings) == "table" then
+                for key, warning in pairs(warnings) do
+                    if type(warning) == "string" then notes[warning] = true
+                    elseif warning == true and type(key) == "string" then notes[key] = true end
+                end
+            end
+        end
+        local function addResult(result, errorMessage, kind, hideRow)
             if result and result.excluded then return end
             if not addedSpacer then tooltip:AddLine(" "); addedSpacer = true end
-            if not base then displayedProfiles = displayedProfiles + 1 end
-            local label = base and "  Base" or profile.name
+            if not kind then displayedProfiles = displayedProfiles + 1 end
+            local label = kind and "  " .. kind or profile.name
             if result then
-                for _, item in ipairs(result.comparisons) do
+                for _, item in ipairs(result.comparisons or {}) do
                     if item.error then notes[item.error] = true end
                     issues = issues or item.hasIssues
                 end
-                if not hideRow then tooltip:AddDoubleLine(label, resultValues(result, base), r,g,b, r,g,b) end
+                if not hideRow then tooltip:AddDoubleLine(label, resultValues(result, kind ~= nil), r,g,b, r,g,b) end
                 if result.note then notes[result.note] = true end
+                addWarnings(result.averageUseWarnings)
                 issues = issues or result.hasIssues or hasIssues(result.record, profile)
             elseif not hideRow then
                 tooltip:AddLine(label .. ": " .. tostring(errorMessage or "Item data loading"), r,g,b, true)
             end
-            if base and not hideRow then shrinkBaseLine(tooltip) end
+            if kind and not hideRow then shrinkBaseLine(tooltip) end
         end
-        local result, errorMessage = readResult(false)
-        addResult(result, errorMessage, false)
+        local result, errorMessage = readResult()
+        addResult(result, errorMessage)
         if not (result and result.excluded) and self.GetBaseScore and self.CompareBaseItem then
-            local baseResult, baseError = readResult(true)
+            local baseResult, baseError = readResult("Base")
             local duplicate = resultIdentity(result, errorMessage) == resultIdentity(baseResult, baseError)
-            addResult(baseResult, baseError, true, duplicate)
+            addResult(baseResult, baseError, "Base", duplicate)
+            local averageMethod = (compare and self.CompareAverageUseItem) or
+                (not compare and self.GetAverageUseScore)
+            if averageMethod then
+                local averageResult, averageError, metadata = readResult("Average use")
+                metadata = averageResult or metadata or {}
+                if not (averageResult and averageResult.excluded) then
+                    -- Keep warnings from hidden estimates, but never present a
+                    -- numeric average when any candidate/baseline Use is unknown.
+                    addResult(averageResult, averageError, "Average use", true)
+                    addWarnings(metadata.averageUseWarnings)
+                    if metadata.averageUseIncomplete then
+                        addResult(nil, "unavailable", "Average use")
+                    elseif averageResult and averageResult.score ~= nil then
+                        local same = resultIdentity(averageResult, averageError) == resultIdentity(baseResult, baseError)
+                        if not same then
+                            addResult(averageResult, averageError, "Average use")
+                            notes["Average use assumes use on cooldown."] = true
+                        end
+                    elseif metadata.hasAverageUse then
+                        addResult(nil, "unavailable", "Average use")
+                        if averageError then addWarnings(averageError) end
+                    end
+                end
+            end
         end
     end
     for note in pairs(notes) do tooltip:AddLine("  " .. note, .75,.75,.75, true) end

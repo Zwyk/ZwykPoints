@@ -1,6 +1,6 @@
 local addonName, FW = ...
 _G.ZwykValues = FW
-FW.version = "0.1.14"
+FW.version = "0.1.15"
 
 function FW:Print(message)
     local text = "|cff80ccffZwykValues:|r " .. tostring(message)
@@ -26,6 +26,9 @@ local function inspect(link)
         build=GetBuildInfo and ({GetBuildInfo()}) or {},
         locale=GetLocale and GetLocale() or "unknown", stats=record.stats,
         percentStats=record.percentStats, ratingStats=record.ratingStats,
+        onUseStats=record.onUseStats, onUsePercentStats=record.onUsePercentStats,
+        onUseRatingStats=record.onUseRatingStats, onUseEffects=record.onUseEffects,
+        onUseUnsupported=record.onUseUnsupported,
         unresolvedStats=record.unresolvedStats, unrecognizedLines=record.unrecognizedLines,
         unknownAPIStats=record.unknownAPIStats, warnings=record.warnings, raw=raw,
         scoreIssues=stored.scoreIssues, profileScores=stored.profileScores}

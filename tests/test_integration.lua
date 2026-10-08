@@ -20,6 +20,12 @@ local itemDB={
     ["item:112:0:0:0:0:0:0:0:60"]={name="New arrows",ammoDps=7.5,equipLoc="INVTYPE_AMMO",classID=6,subclassID=2},
     ["item:113:0:0:0:0:0:0:0:60"]={name="Equipped arrows",ammoDps=4,equipLoc="INVTYPE_AMMO",classID=6,subclassID=2},
     ["item:114:0:0:0:0:0:0:0:60"]={name="Equipped bow",strength=99,crit=1,equipLoc="INVTYPE_RANGED",classID=2,subclassID=2},
+    ["item:115:8481:0:0:0:0:0:0:60"]={name="Enchanted Use helmet",strength=0,crit=0,spellPower=20,enchant=5,equipLoc="INVTYPE_HEAD",use="Use: Increases spell power by 120 for 10 sec. (2 Min Cooldown)"},
+    ["item:115:0:0:0:0:0:0:0:60"]={name="Base Use helmet",strength=0,crit=0,spellPower=20,equipLoc="INVTYPE_HEAD",use="Use: Increases spell power by 120 for 10 sec. (2 Min Cooldown)"},
+    ["item:116:8481:0:0:0:0:0:0:60"]={name="Equipped enchanted Use helmet",strength=0,crit=0,spellPower=18,enchant=10,equipLoc="INVTYPE_HEAD",use="Use: Increases spell power by 60 for 10 sec. (2 Min Cooldown)"},
+    ["item:116:0:0:0:0:0:0:0:60"]={name="Equipped Base Use helmet",strength=0,crit=0,spellPower=18,equipLoc="INVTYPE_HEAD",use="Use: Increases spell power by 60 for 10 sec. (2 Min Cooldown)"},
+    ["item:117:0:0:0:0:0:0:0:60"]={name="Passive spell-power helmet",strength=0,crit=0,spellPower=23,equipLoc="INVTYPE_HEAD"},
+    ["item:118:0:0:0:0:0:0:0:60"]={name="Use helmet awaiting cooldown",strength=0,crit=0,spellPower=15,equipLoc="INVTYPE_HEAD",use="Use: Increases spell power by 120 for 10 sec."},
 }
 local candidate="item:100:0:0:0:0:0:0:0:60"
 local baseline="item:101:0:0:0:0:0:0:0:60"
@@ -27,6 +33,8 @@ local variant="item:100:0:0:0:0:0:-7:123:60"
 local scanned="item:102:0:0:0:0:0:0:0:60"
 local partial="item:103:0:0:0:0:0:0:0:60"
 local reads,scans,scoreCalls=0,0,0
+local clock=10
+GetTime=function() return clock end
 local function definition(link)
     local payload=type(link)=="string" and link:match("(item:[^|%s]+)")
     return assert(itemDB[payload],"Unexpected item " .. tostring(link))
@@ -36,9 +44,11 @@ local function sourceLines(link)
     if item.ammoDps then return {item.name,"Adds " .. item.ammoDps .. " damage per second"} end
     local lines = {item.name,"+" .. item.strength .. " Strength",
         "Equip: Increases your chance to get a critical strike by " .. item.crit .. "%."}
+    if item.spellPower then lines[#lines+1]="Equip: Increases damage and healing done by magical spells and effects by up to " .. item.spellPower .. "." end
     if item.unknown then lines[#lines+1]="+" .. item.unknown .. " Mystic Focus" end
     if item.enchant then lines[#lines+1]="Enchanted: Strength +" .. item.enchant end
     if item.classes then lines[#lines+1]="Classes: " .. item.classes end
+    if item.use then lines[#lines+1]=item.use end
     return lines
 end
 GetBuildInfo=function() return "16.0.0","65000","Oct 1 2026",160000 end
@@ -58,6 +68,7 @@ C_Item={
         local item=definition(link)
         if item.ammoDps then return {ITEM_MOD_DAMAGE_PER_SECOND_SHORT=item.ammoDps} end
         local stats = {ITEM_MOD_STRENGTH_SHORT=item.strength,ITEM_MOD_CRIT_SHORT=item.crit}
+        if item.spellPower then stats.ITEM_MOD_SPELL_POWER_SHORT=item.spellPower end
         if item.unknown then stats.ITEM_MOD_FOREVER_FOCUS_SHORT=item.unknown end
         return stats
     end,
@@ -196,6 +207,7 @@ assert(FW.ScanTooltip:NumLines()==3 and not FW.ScanTooltip:IsShown())
 -- Actual client metadata -> profile filters -> full/base tooltip and upgrade
 -- decisions. The same item can be hidden for one profile and shown for another.
 C_TooltipInfo={GetHyperlink=function(link)
+    scans=scans+1
     local lines={}
     for _,text in ipairs(sourceLines(link)) do lines[#lines+1]={leftText=text} end
     return {lines=lines}
@@ -271,6 +283,84 @@ FW.equipmentRevision=1
 ammoComparison=assert(FW:CompareItem(ammoLink,ammoProfile))
 assert(ammoComparison.comparisons[1].baseline==0 and ammoComparison.comparisons[1].percent==nil)
 GetInventoryItemLink=nativeInventoryLink
+
+-- A real Use line flows through parsing, Base-derived weighting, both equipped
+-- averages and tooltip relevance. Static upgrade markers retain their score.
+local averageProfile=assert(FW:CreateProfile("Average caster",{spellDamage=2,healing=1,strength=2}))
+for _,profile in ipairs({one,two,ammoProfile}) do assert(FW:UpdateProfile(profile.id,{active=false})) end
+assert(FW:SetMainProfile(averageProfile.id))
+local enchantedUse="item:115:8481:0:0:0:0:0:0:60"
+local baseUse="item:115:0:0:0:0:0:0:0:60"
+local equippedUse="item:116:8481:0:0:0:0:0:0:60"
+local equippedBaseUse="item:116:0:0:0:0:0:0:0:60"
+local passiveUseCandidate="item:117:0:0:0:0:0:0:0:60"
+local missingCooldown="item:118:0:0:0:0:0:0:0:60"
+baseline=equippedUse
+local fullUseScore=assert(FW:GetScore(enchantedUse,averageProfile))
+local baseUseScore=assert(FW:GetBaseScore(enchantedUse,averageProfile))
+local averageUseScore,useRecord,_,useMetadata=FW:GetAverageUseScore(enchantedUse,averageProfile)
+assert(fullUseScore==70 and baseUseScore==60 and averageUseScore==90, "Use average adds its gain to the unenchanted score")
+assert(useRecord==FW:GetItem(baseUse) and useRecord.stats.spellDamage==20 and useRecord.stats.healing==20, "Average scoring keeps the parsed Base item and its static stats")
+assert(#useRecord.onUseEffects==1 and useRecord.onUseEffects[1].amount==120 and useRecord.onUseEffects[1].duration==10 and useRecord.onUseEffects[1].cooldown==120, "the actual parser reads the complete Use amount, duration and cooldown")
+assert(useRecord.onUseStats.spellDamage==10 and useRecord.onUseStats.healing==10 and useMetadata.averageUseGain==30, "120 spell power for 10/120 seconds gives 10 averaged damage and healing")
+assert(useMetadata.hasAverageUse and not useMetadata.averageUseIncomplete and #useMetadata.averageUseWarnings==0)
+local equippedAverage,equippedRecord=FW:GetAverageUseScore(equippedUse,averageProfile,true)
+assert(FW:GetScore(equippedUse,averageProfile)==74 and FW:GetBaseScore(equippedUse,averageProfile)==54 and equippedAverage==69, "the equipped item's enchant is removed before averaging its own Use effect")
+assert(equippedRecord==FW:GetItem(equippedBaseUse) and equippedRecord.onUseStats.spellDamage==5)
+local actualAverageComparison=assert(FW:CompareAverageUseItem(enchantedUse,averageProfile))
+assert(actualAverageComparison.score==90 and actualAverageComparison.comparisons[1].baseline==69 and actualAverageComparison.comparisons[1].delta==21 and actualAverageComparison.comparisons[1].status=="upgrade", "the candidate and equipped Base-derived averages use the same weighting")
+GameTooltip:SetHyperlink(enchantedUse)
+assert(findLine("Average caster").right=="70.00  |cffff5959|TInterface\\AddOns\\ZwykValues\\Textures\\ArrowDown:12:12:0:0|t-4.00 (-5.4%)|r")
+assert(findLine("  Base").right=="60.00  |cff40ff59|TInterface\\AddOns\\ZwykValues\\Textures\\ArrowUp:10:10:0:0|t+6.00 (+11.1%)|r")
+assert(findLine("  Average use").right=="90.00  |cff40ff59|TInterface\\AddOns\\ZwykValues\\Textures\\ArrowUp:10:10:0:0|t+21.00 (+30.4%)|r")
+assert(findLine("  Average use assumes use on cooldown.") and not findLine("Partial stat data; /zv inspect or /zv exportissues."))
+assert(not FW:IsMainProfileUpgrade(enchantedUse), "Use averages do not change the main static-score upgrade decision")
+local useChat="|H" .. enchantedUse .. "|h[Enchanted Use helmet]|h"
+assert(FW:DecorateUpgradeChatMessage(useChat)==useChat, "chat upgrade arrows continue to use the regular enchanted score")
+local cachedUseReads,cachedUseScans,cachedUseScores=reads,scans,scoreCalls
+GameTooltip:SetHyperlink(enchantedUse)
+assert(reads==cachedUseReads and scans==cachedUseScans and scoreCalls==cachedUseScores, "repeat complete Use tooltips reuse parsed records and weighted totals")
+
+-- A passive candidate still needs an Average row when an equipped Use effect
+-- changes only its replacement comparison, even with zero candidate Use gain.
+GameTooltip:SetHyperlink(passiveUseCandidate)
+local passiveScore,passiveRecord,_,passiveMetadata=FW:GetAverageUseScore(passiveUseCandidate,averageProfile)
+assert(passiveScore==69 and not passiveMetadata.hasAverageUse and passiveMetadata.averageUseGain==0 and #passiveRecord.onUseEffects==0)
+local passiveAverageComparison=assert(FW:CompareAverageUseItem(passiveUseCandidate,averageProfile))
+assert(passiveAverageComparison.hasAverageUse and passiveAverageComparison.averageUseGain==0 and passiveAverageComparison.comparisons[1].baseline==69 and passiveAverageComparison.comparisons[1].status=="equal", "equipped effects make a passive candidate's average comparison relevant")
+assert(findLine("  Base").right=="69.00  |cff40ff59|TInterface\\AddOns\\ZwykValues\\Textures\\ArrowUp:10:10:0:0|t+15.00 (+27.8%)|r")
+assert(findLine("  Average use").right=="69.00  |cffb2b2b2=0.00 (+0.0%)|r", "an unchanged candidate score retains the equipped-use comparison difference")
+
+-- Missing cooldown data is a retryable Use-only issue. Repairing tooltip text
+-- after the one-second retry window preserves the cached static API extraction.
+baseline=passiveUseCandidate
+GameTooltip:SetHyperlink(missingCooldown)
+local unavailableScore,unavailableRecord,_,unavailableMetadata=FW:GetAverageUseScore(missingCooldown,averageProfile)
+assert(unavailableScore==45 and unavailableMetadata.hasAverageUse and unavailableMetadata.averageUseIncomplete and unavailableRecord.onUseRetryable)
+assert(findLine("Average caster").right:find("45.00",1,true) and not findLine("  Base"), "missing Use cooldowns retain regular values without redundant Base")
+assert(findLine("  Average use: unavailable") and not findLine("  Average use") and not findLine("  Average use assumes use on cooldown."), "incomplete Use estimates never show a confident numeric row")
+assert(not findLine("Partial stat data; /zv inspect or /zv exportissues."), "a Use-only issue does not mark complete static stats as partial")
+local unavailableWarning=false
+for _,line in ipairs(GameTooltip.lines) do if line.left:find("full on-use cooldown",1,true) then unavailableWarning=true end end
+assert(unavailableWarning,"the unavailable row explains the missing full cooldown")
+local retryReads,retryScans=reads,scans
+local staticSnapshot=assert(FW.JSON.Encode(unavailableRecord.stats))
+itemDB[missingCooldown].use="Use: Increases spell power by 120 for 10 sec. (2 Min Cooldown)"
+clock=clock+.5
+local earlyScore,earlyRecord,_,earlyMetadata=FW:GetAverageUseScore(missingCooldown,averageProfile)
+assert(earlyScore==45 and earlyRecord==unavailableRecord and earlyMetadata.averageUseIncomplete and reads==retryReads and scans==retryScans, "repeated incomplete hovers share the bounded retry window")
+clock=clock+.5
+local recoveredScore,recoveredRecord,_,recoveredMetadata=FW:GetAverageUseScore(missingCooldown,averageProfile)
+assert(recoveredScore==75 and recoveredRecord==unavailableRecord and not recoveredMetadata.averageUseIncomplete and recoveredMetadata.averageUseGain==30 and #recoveredMetadata.averageUseWarnings==0, "an available cooldown recovers the same item record's average")
+assert(reads==retryReads and scans==retryScans+1, "Use recovery rereads tooltip text once without repeating GetItemStats")
+assert(assert(FW.JSON.Encode(recoveredRecord.stats))==staticSnapshot and FW:GetScore(missingCooldown,averageProfile)==45, "Use-only recovery does not alter static stats or cached static totals")
+GameTooltip:SetHyperlink(missingCooldown)
+assert(findLine("  Average use").right=="75.00  |cff40ff59|TInterface\\AddOns\\ZwykValues\\Textures\\ArrowUp:10:10:0:0|t+6.00 (+8.7%)|r" and not findLine("  Average use: unavailable"), "the repaired Use effect reaches comparison and tooltip display")
+assert(findLine("  Average use assumes use on cooldown.") and reads==retryReads and scans==retryScans+1)
+baseline=oldBaseline
+for _,profile in ipairs({one,two,ammoProfile}) do assert(FW:UpdateProfile(profile.id,{active=true})) end
+assert(FW:UpdateProfile(averageProfile.id,{active=false}))
+assert(FW:SetMainProfile(ammoProfile.id))
 
 -- SavedVariables reused by a fresh addon namespace keep valid item totals.
 local persisted=ZwykValuesDB

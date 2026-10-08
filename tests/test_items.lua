@@ -332,7 +332,7 @@ for _, sample in ipairs(foreverCases) do
     equal(next(item.unresolvedStats), nil)
     equal(FW:GetIssueReport().itemCount, 0)
     equal(FW:GetItem("item:" .. sample.id .. ":8481"), item, "resolved item caches")
-    equal(item.parserVersion, 6, "old persisted parser results receive a new key")
+    equal(item.parserVersion, 7, "old persisted parser results receive a new key")
 end
 
 FW = newReader({ raw = { RESISTANCE0_NAME = 141, ITEM_MOD_STAMINA_SHORT = 4 },
@@ -410,7 +410,7 @@ equal(FW.DB.cache.items[item.key],nil,"missing ammo DPS is never cached as a com
 
 FW = newReader({raw={},classID=6,subclassID=2,equipLoc="INVTYPE_AMMO",lines={"Arrow","Adds 7.5 damage per second"}})
 local ammoProfile = assert(FW:CreateProfile("Cache migration",{rangedDps=2,dps=100}))
-local oldAmmoKey = FW:ItemKey("item:511"):gsub("^6|","4|")
+local oldAmmoKey = FW:ItemKey("item:511"):gsub("^7|","4|")
 FW.DB.cache.items[oldAmmoKey] = {key=oldAmmoKey,stats={dps=7.5},equipLoc="INVTYPE_AMMO"}
 FW.DB.cache.scores[oldAmmoKey] = {[ammoProfile.id]={revision=ammoProfile.revision,score=750}}
 equal(FW:GetScore("item:511",ammoProfile),15,"parser update ignores ammo previously cached as melee DPS")

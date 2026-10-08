@@ -40,13 +40,27 @@ end
 -- Rings/trinkets are separate replacements. A two-handed weapon replaces the
 -- combined main/off-hand score; a shield cannot be compared to an occupied 2H slot.
 function FW:CompareItem(link, profile, baseOnly)
-    local getScore = baseOnly and self.GetBaseScore or self.GetScore
-    local score, record, detail = getScore(self, link, profile)
+    local averageUse = baseOnly == "averageUse"
+    local getScore = averageUse and self.GetAverageUseScore or (baseOnly and self.GetBaseScore or self.GetScore)
+    local score, record, detail, metadata = getScore(self, link, profile)
     if score == nil then
         if detail == "excluded" then return {excluded=true, record=record, comparisons={}} end
-        return nil, record
+        return nil, record, averageUse and metadata or nil
     end
     local result = {score=score, record=record, comparisons={}}
+    local function mergeAverageUse(value)
+        if not averageUse or not value then return end
+        result.hasAverageUse = result.hasAverageUse or value.hasAverageUse
+        result.averageUseIncomplete = result.averageUseIncomplete or value.averageUseIncomplete
+        result.averageUseWarnings = result.averageUseWarnings or {}
+        for _, warning in ipairs(value.averageUseWarnings or {}) do
+            result.averageUseWarnings[#result.averageUseWarnings+1] = warning
+        end
+    end
+    if averageUse then
+        result.averageUseGain = metadata and metadata.averageUseGain or 0
+        mergeAverageUse(metadata)
+    end
     result.hasIssues = (self.ItemHasIssues and self:ItemHasIssues(record, profile)) or record.partial
     local equipLoc = record.equipLoc
     local needsMainType = equipLoc == "INVTYPE_WEAPON" or equipLoc == "INVTYPE_WEAPONMAINHAND" or
@@ -86,7 +100,11 @@ function FW:CompareItem(link, profile, baseOnly)
             local equipped = inventoryLink(slot)
             if equipped then
                 comparison.links[#comparison.links+1] = equipped
-                local equippedScore, equippedRecord = getScore(self, equipped, profile, true)
+                local equippedScore, equippedRecord, _, equippedMetadata = getScore(self, equipped, profile, true)
+                mergeAverageUse(equippedMetadata)
+                if averageUse and equippedMetadata and equippedMetadata.averageUseIncomplete then
+                    comparison.averageUseIncomplete = true
+                end
                 if equippedScore == nil then comparison.error = tostring(equippedRecord); break end
                 if (self.ItemHasIssues and self:ItemHasIssues(equippedRecord, profile)) or equippedRecord.partial then
                     comparison.hasIssues, result.hasIssues = true, true
@@ -94,7 +112,8 @@ function FW:CompareItem(link, profile, baseOnly)
                 comparison.baseline = comparison.baseline + equippedScore
             end
         end
-        if not comparison.error then
+        if not comparison.error and not (averageUse and
+            ((metadata and metadata.averageUseIncomplete) or comparison.averageUseIncomplete)) then
             comparison.delta, comparison.percent, comparison.status =
                 self:CalculateDelta(score, comparison.baseline)
         end
@@ -110,4 +129,8 @@ end
 
 function FW:CompareBaseItem(link, profile)
     return self:CompareItem(link, profile, true)
+end
+
+function FW:CompareAverageUseItem(link, profile)
+    return self:CompareItem(link, profile, "averageUse")
 end

@@ -1,4 +1,4 @@
-# ZwykValues 0.1.14
+# ZwykValues 0.1.15
 
 A standalone stat-weight addon written from scratch for WoW Forever. No Pawn code, Pawn dependency, third-party libraries, or online item database is required.
 
@@ -80,6 +80,10 @@ Every active profile adds one row with its name and score in the profile color. 
 
 A smaller, indented **Base** subline appears only when its displayed score or any equipped comparison differs from that profile's main row. Identical values are hidden, including differences too small to change the rounded display. It scores the same item without its enchant and compares it against the equipped items with their enchants removed too, so an equipped enchant can make Base relevant even on an unenchanted candidate. The client supplies the unenchanted stats directly; the addon does not subtract guessed enchant bonuses. Intrinsic item variants, including random-suffix stats, remain part of the base value. Equipped and shopping tooltips show the base score alone when it differs. Base loading/errors remain visible when they add different information, and partial-data warnings are retained even when a duplicate numeric row is hidden. The full score above still includes recognized enchants.
 
+A smaller **Average use** subline adds the average gain from readable on-use stat buffs to the unenchanted Base value. Each effect contributes `stat amount × duration / cooldown`, using seconds for both times and limiting uptime to 100%. For example, 120 spell power for 10 seconds on a 2-minute cooldown contributes 10 average spell power; the profile's spell-damage and healing weights determine its value. Each equipped comparison uses its own Base plus average-use value too. The subline appears only when its rounded score or comparisons differ from Base, including a passive candidate compared with an equipped on-use item.
+
+This estimate assumes using the item as soon as its cooldown ends. It needs an explicit flat stat amount, buff duration and total cooldown in the tooltip. It does not use the remaining cooldown, guess rating conversions, or model encounter length, delayed uses, shared trinket cooldowns, stacking, decreasing bonuses, proc chance or direct damage/healing abilities. Unsupported effects or an unavailable weighted secondary-stat unit show **Average use: unavailable** while retaining the ordinary scores. Main-profile bag, roll and chat arrows continue to use the full static score.
+
 Version 0.1.8 accepts Forever's named item-quality colors (`|cnIQ2:`) as well as hexadecimal link colors, fixing **Base: Invalid item link** for those links. Both candidate and equipped item links retain their complete variant data when removing the enchant.
 
 The up/down indicators use packaged arrow textures so they display even when the tooltip font has no Unicode arrow glyphs. Equality uses `=`. Two spaces separate the score from the first comparison. Multiple replacement choices share the same row, in equipped slot order:
@@ -114,7 +118,7 @@ Native Blizzard bags and loot-roll windows are supported. BetterBags 0.5.14 is a
 
 Other third-party bag addons can integrate their buttons explicitly with `ZwykValues:RegisterUpgradeItemButton(button, linkProvider)` and re-register after their own slot updates; `linkProvider(button)` must return the current full item link or nil.
 
-After upgrading to 0.1.14, parser-versioned cache keys automatically refresh item stats and classification. Older ammunition entries stored under melee DPS are also refreshed. Issue exports intentionally preserve historical problems: use `/zv clearissues`, then hover the items again to collect a report for the new parser.
+After upgrading to 0.1.15, parser-versioned cache keys automatically refresh item stats, classification and on-use metadata. Issue exports intentionally preserve historical problems: use `/zv clearissues`, then hover the items again to collect a report for the new parser.
 
 ## Debugging unrecognized stats
 
@@ -145,7 +149,7 @@ Editing weights or units increments the profile revision and invalidates its sco
 
 ## Scope and validation
 
-This release evaluates static item stats. It does not model procs, on-use effects, set bonuses, stat caps, talent interactions, DPS rotations, class equipment restrictions, or future equipment combinations. Spell-power or attack-power weights should already include their expected value for your build. A higher score is a stat-weight estimate, not a simulated DPS percentage.
+This release evaluates static item stats and separately estimates the average of supported on-use stat buffs. It does not model procs, set bonuses, stat caps, talent interactions, DPS rotations, class equipment restrictions, or future equipment combinations. Spell-power or attack-power weights should already include their expected value for your build. A higher score is a stat-weight estimate, not a simulated DPS percentage.
 
 The Lua scoring, JSON, cache, parser, comparison, issue export, and tooltip/event logic are covered by mocked API tests included in `tests`. There is no running WoW client in this environment, so the actual UI rendering, the current Forever beta stat vocabulary, and secure tooltip behavior require an in-game check. Use `/zv inspect` for one item or `/zv exportissues` for all recorded issues.
 
@@ -156,6 +160,8 @@ lua tests/test_core.lua
 lua tests/test_items.lua
 lua tests/test_compare.lua
 lua tests/test_base.lua
+lua tests/test_on_use_items.lua
+lua tests/test_on_use.lua
 lua tests/test_filters.lua
 lua tests/test_item_metadata.lua
 lua tests/test_tooltips.lua
@@ -175,7 +181,7 @@ lua tests/test_hover_performance.lua
 - `JSON.lua`: strict JSON reader/writer; no executable imports.
 - `Stats.lua`: stat schema and native API mappings.
 - `Core.lua`: profile management, import/export, scoring, and score-cache invalidation.
-- `Items.lua`: item variants, client data loading, normalization, and static tooltip parsing.
+- `Items.lua`: item variants, client data loading, normalization, static tooltip parsing and timed on-use stat buffs.
 - `Compare.lua`: equipped slot comparisons.
 - `Upgrades.lua`: main-profile upgrade decisions and local chat-link decoration.
 - `Indicators.lua`: native bag/loot-roll overlays and refresh hooks.

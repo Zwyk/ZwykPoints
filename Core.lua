@@ -630,6 +630,9 @@ function FW:RecordItemIssue(record)
         tooltipLines = diagnostic.tooltipLines or {}, tooltipSource = diagnostic.tooltipSource,
         tooltipDetails = diagnostic.tooltipDetails or {},
         stats = record.stats, percentStats = record.percentStats, ratingStats = record.ratingStats,
+        onUseStats = record.onUseStats, onUsePercentStats = record.onUsePercentStats,
+        onUseRatingStats = record.onUseRatingStats, onUseEffects = record.onUseEffects,
+        onUseUnsupported = record.onUseUnsupported,
         unresolvedStats = record.unresolvedStats or {}, unrecognizedLines = record.unrecognizedLines or {},
         partial = record.partial == true, warnings = record.warnings or {},
         scoreIssues = record.scoreIssues or {}, profileScores = record.profileScores or {},
@@ -753,6 +756,61 @@ function FW:GetScore(link, profile, ignoreFilters)
     end
     trimCache(cache)
     return score, record
+end
+
+-- Average-use values are a separate view of the unenchanted item. They never
+-- alter static scores, stat warnings, or main-profile upgrade indicators.
+function FW:GetAverageUseScore(link, profile, ignoreFilters)
+    self:Initialize()
+    if type(profile) == "string" then profile = self.DB.profiles[profile] end
+    if type(profile) ~= "table" or not self.DB.profiles[profile.id] then return nil, "Profile not found." end
+    local baseScore, record, detail = self:GetBaseScore(link, profile, ignoreFilters)
+    if baseScore == nil then return nil, record, detail end
+    if self.RefreshOnUseItem then self:RefreshOnUseItem(record) end
+    record.averageUseScores = record.averageUseScores or {}
+    local cached = record.averageUseScores[profile.id]
+    if type(cached) == "table" and cached.revision == profile.revision and cached.baseScore == baseScore
+        and finite(cached.score) and type(cached.metadata) == "table" then
+        return cached.score, record, detail, cached.metadata
+    end
+    local stats, warnings = {}, {}
+    for key, value in pairs(record.onUseStats or {}) do stats[key] = value end
+    local incomplete = #(record.onUseUnsupported or {}) > 0
+    for _, effect in ipairs(record.onUseUnsupported or {}) do
+        local reason = tostring(effect.reason or "effect could not be read reliably"):gsub("%.$", "")
+        warnings[#warnings+1] = "On-use average unavailable: " .. reason .. "."
+    end
+    local selected = profile.secondaryUnit == "rating" and record.onUseRatingStats or record.onUsePercentStats
+    local other = profile.secondaryUnit == "rating" and record.onUsePercentStats or record.onUseRatingStats
+    selected, other = selected or {}, other or {}
+    for key in pairs(secondaryKeys) do
+        stats[key] = selected[key] or 0
+        if other[key] ~= nil and (profile.weights[key] or 0) ~= 0 then
+            incomplete = true
+            local label = self.StatByKey[key] and self.StatByKey[key].label or key
+            local unit = profile.secondaryUnit == "rating" and "rating points" or
+                (key == "defense" and "defense skill points" or "percentage points")
+            warnings[#warnings+1] = "On-use " .. label .. " is unavailable in " .. unit .. "; check the profile's secondary stat unit."
+        end
+    end
+    local hasStats = next(record.onUseStats or {}) or next(record.onUsePercentStats or {}) or next(record.onUseRatingStats or {})
+    local gain = hasStats and self:ScoreStats(profile, stats) or 0
+    local score = baseScore + gain
+    table.sort(warnings)
+    local metadata = {
+        averageUseGain = gain,
+        hasAverageUse = #(record.onUseEffects or {}) > 0 or #(record.onUseUnsupported or {}) > 0,
+        averageUseIncomplete = incomplete,
+        averageUseWarnings = warnings,
+    }
+    if not finite(gain) or not finite(score) then
+        metadata.averageUseIncomplete = true
+        local errorMessage = "This item's average-use total is not finite; reduce the profile weights."
+        metadata.averageUseWarnings[#metadata.averageUseWarnings+1] = errorMessage
+        return nil, errorMessage, nil, metadata
+    end
+    record.averageUseScores[profile.id] = {revision=profile.revision, baseScore=baseScore, score=score, metadata=metadata}
+    return score, record, detail, metadata
 end
 
 function FW:GetCacheCount()
