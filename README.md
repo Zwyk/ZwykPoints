@@ -1,4 +1,4 @@
-# ZwykValues 0.1.15
+# ZwykValues 0.1.16
 
 A standalone stat-weight addon written from scratch for WoW Forever. No Pawn code, Pawn dependency, third-party libraries, or online item database is required.
 
@@ -66,6 +66,8 @@ Separate healing/damage effects and compound static enchant lines (for example, 
 
 English and French static tooltip text are supported, with localized Blizzard formats used where available. Other locales can still expose API stats, but unrecognized tooltip-only values need further validation.
 
+Version 0.1.16 reads elemental wand damage ranges and the client's school-damage API aliases. `Your spells pierce N Magical Resistance` contributes to spell penetration. Separate signed Armor lines are bonus armor: Tortoise Armor's `208 Armor` and `+40 Armor` become 208 base armor and 40 bonus armor, counted once. Explicit damage-received reduction and profession skill bonuses are recorded as ignored diagnostics because they have no matching weight in the current stat schema; they do not create an offensive spell-damage value or a partial-data warning.
+
 ## Tooltip comparisons
 
 Values use a positive allowlist: supported weapon and armor subtypes in their character equipment slots, plus ammunition in the ammo slot. This includes jewelry, shields/offhands, relics, shirts and tabards. A weapon or armor candidate must have its subtype checked in that profile. Unknown numeric subtypes are excluded; missing class/subtype metadata waits for loading rather than assuming eligibility. Full and instant item-info APIs supply the classification. Equipped baselines bypass profile checkboxes while still requiring supported gear.
@@ -118,7 +120,7 @@ Native Blizzard bags and loot-roll windows are supported. BetterBags 0.5.14 is a
 
 Other third-party bag addons can integrate their buttons explicitly with `ZwykValues:RegisterUpgradeItemButton(button, linkProvider)` and re-register after their own slot updates; `linkProvider(button)` must return the current full item link or nil.
 
-After upgrading to 0.1.15, parser-versioned cache keys automatically refresh item stats, classification and on-use metadata. Issue exports intentionally preserve historical problems: use `/zv clearissues`, then hover the items again to collect a report for the new parser.
+After upgrading to 0.1.16, parser-versioned cache keys automatically refresh item stats, classification and on-use metadata. The report's top-level addon version identifies the exporter; each entry's `parserVersion` and `lastSeen` identify when that issue was collected. Issue exports intentionally preserve historical problems. To collect a fresh report, run `/zv clearissues`, then `/zv clearcache`, hover the affected items again, and run `/zv exportissues`.
 
 ## Debugging unrecognized stats
 
@@ -162,6 +164,9 @@ lua tests/test_compare.lua
 lua tests/test_base.lua
 lua tests/test_on_use_items.lua
 lua tests/test_on_use.lua
+lua tests/test_report_stats.lua
+lua tests/test_report_armor.lua
+lua tests/test_weapon_schools.lua
 lua tests/test_filters.lua
 lua tests/test_item_metadata.lua
 lua tests/test_tooltips.lua

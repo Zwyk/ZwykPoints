@@ -44,7 +44,7 @@ local function read(use,locale,extra)
     return assert(FW:GetItem('item:900:0')),FW
 end
 local item,FW=read('Use: Increases spell power by 120 for 10 sec. (2 Min Cooldown)')
-equal(item.parserVersion,7)
+equal(item.parserVersion,8)
 equal(item.stats.strength,4);equal(item.stats.spellDamage,nil);equal(item.stats.healing,nil)
 near(item.onUseStats.spellDamage,10);near(item.onUseStats.healing,10)
 equal(item.partial,false);equal(#item.warnings,0);equal(#item.unrecognizedLines,0)

@@ -125,7 +125,7 @@ equal(baseScore, 10, "base score is read from the unenchanted variant")
 equal(baseRecord.link, baseLink)
 equal(baseRecord.partial, false)
 assert(fullRecord.key ~= baseRecord.key, "base and full variants need separate cache entries")
-equal(baseRecord.parserVersion, 7, "base scoring uses the current item metadata schema")
+equal(baseRecord.parserVersion, 8, "base scoring uses the current item metadata schema")
 equal(statCalls[baseLink], 1); equal(tooltipCalls[baseLink], 1)
 equal(FW:GetBaseScore("item:100:9999" .. suffix, profile), 10,
     "different enchants reuse the same preserved base variant")

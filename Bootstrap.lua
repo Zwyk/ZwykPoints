@@ -1,6 +1,6 @@
 local addonName, FW = ...
 _G.ZwykValues = FW
-FW.version = "0.1.15"
+FW.version = "0.1.16"
 
 function FW:Print(message)
     local text = "|cff80ccffZwykValues:|r " .. tostring(message)
@@ -30,7 +30,8 @@ local function inspect(link)
         onUseRatingStats=record.onUseRatingStats, onUseEffects=record.onUseEffects,
         onUseUnsupported=record.onUseUnsupported,
         unresolvedStats=record.unresolvedStats, unrecognizedLines=record.unrecognizedLines,
-        unknownAPIStats=record.unknownAPIStats, warnings=record.warnings, raw=raw,
+        unknownAPIStats=record.unknownAPIStats, ignoredTooltipStats=record.ignoredTooltipStats,
+        warnings=record.warnings, raw=raw,
         scoreIssues=stored.scoreIssues, profileScores=stored.profileScores}
     if FW.CopyItemDiagnostic then data=FW:CopyItemDiagnostic(data) end
     local json, encodeError = FW.JSON.Encode(data)

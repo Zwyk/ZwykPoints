@@ -627,6 +627,7 @@ function FW:RecordItemIssue(record)
         source = diagnostic.source, apiAvailable = diagnostic.apiAvailable,
         raw = diagnostic.raw or {}, ignoredAPIStats = diagnostic.ignoredKeys or {},
         unknownAPIStats = record.unknownAPIStats or diagnostic.unknownKeys or {},
+        ignoredTooltipStats = record.ignoredTooltipStats or {},
         tooltipLines = diagnostic.tooltipLines or {}, tooltipSource = diagnostic.tooltipSource,
         tooltipDetails = diagnostic.tooltipDetails or {},
         stats = record.stats, percentStats = record.percentStats, ratingStats = record.ratingStats,

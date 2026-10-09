@@ -1,5 +1,5 @@
 local _, FW = ...
-local MAX_ITEMS, PARSER_VERSION = 2000, 7
+local MAX_ITEMS, PARSER_VERSION = 2000, 8
 local recentItems, recentCount, recentCache, recentEquipment = {}, 0, nil, nil
 local metadataRetries = setmetatable({}, {__mode="k"})
 local onUseRetries = setmetatable({}, {__mode="k"})
@@ -178,6 +178,7 @@ local absolute = {
 local ratings, untyped = {}, {}
 for _, school in ipairs({ "ARCANE", "FIRE", "NATURE", "FROST", "SHADOW", "HOLY" }) do
     absolute["ITEM_MOD_" .. school .. "_DAMAGE_SHORT"] = school:lower() .. "Damage"
+    absolute["ITEM_MOD_" .. school .. "_DAMAGE_DONE_SHORT"] = school:lower() .. "Damage"
     if school ~= "HOLY" then absolute["ITEM_MOD_" .. school .. "_RESISTANCE_SHORT"] = school:lower() .. "Resist" end
 end
 local secondaryAliases = {
@@ -209,6 +210,18 @@ local ignored = {
     ITEM_MOD_CR_LIFESTEAL_SHORT = true, ITEM_MOD_CR_SPEED_SHORT = true,
     ITEM_MOD_INDESTRUCTIBLE_SHORT = true,
 }
+local professions = {
+    HERBALISM = { "herbalism", "herboristerie" }, MINING = { "mining", "minage" },
+    SKINNING = { "skinning", "dépeçage" }, FISHING = { "fishing", "pêche" },
+    ALCHEMY = { "alchemy", "alchimie" }, BLACKSMITHING = { "blacksmithing", "forge" },
+    ENCHANTING = { "enchanting", "enchantement" }, ENGINEERING = { "engineering", "ingénierie" },
+    LEATHERWORKING = { "leatherworking", "travail du cuir" }, TAILORING = { "tailoring", "couture" },
+    COOKING = { "cooking", "cuisine" }, FIRST_AID = { "first aid", "secourisme" },
+}
+for profession in pairs(professions) do
+    ignored["ITEM_MOD_" .. profession .. "_SHORT"] = true
+    ignored["ITEM_MOD_" .. profession] = true
+end
 
 local function maximum(map, key, value)
     if value ~= nil and (map[key] == nil or value > map[key]) then map[key] = value end
@@ -578,6 +591,33 @@ local function directValue(text, label, percent)
         or number(text:match("^" .. label .. "%s*%+?%s*([%+%-]?[%d%.,]+)" .. suffix .. "$"))
 end
 
+local professionLabels
+local function ignoredTooltipReason(content)
+    if content:match("^spell damage received is reduced by [%d%.,]+$") then
+        return "Spell damage received reduction has no stat in the weight schema."
+    end
+    if not professionLabels then
+        professionLabels = {}
+        for profession, names in pairs(professions) do
+            for _, name in ipairs(names) do professionLabels[name] = true end
+            for _, suffix in ipairs({ "_SHORT", "" }) do
+                local label = _G["ITEM_MOD_" .. profession .. suffix]
+                if type(label) == "string" and not label:find("%%") then
+                    professionLabels[lower(clean(label))] = true
+                end
+            end
+        end
+    end
+    for label in pairs(professionLabels) do
+        if directValue(content, label, false)
+            or number(content:match("^increased " .. escape(label) .. " %+([%d%.,]+)$"))
+            or number(content:match("^increases " .. escape(label) .. " by ([%d%.,]+)$"))
+            or number(content:match("^augmente " .. escape(label) .. " de ([%d%.,]+)$")) then
+            return "Profession skill bonuses have no stat in the weight schema."
+        end
+    end
+end
+
 local function enchantValues(content)
     local values, unknown = {}, {}
     -- Split only explicit enchant conjunctions. Each clause must still match a
@@ -880,6 +920,7 @@ end
 
 local function scan(record, lines)
     local parsed, enchants, percentages, weapon = {}, {}, {}, {}
+    local plainArmor, signedArmor = false, false
     local ammo = record.equipLoc == "INVTYPE_AMMO"
     local locale = GetLocale and GetLocale() or "enUS"
     local supportedLocale = locale == "enUS" or locale == "enGB" or locale == "frFR"
@@ -916,7 +957,15 @@ local function scan(record, lines)
                         elseif isSecondary then
                             percentages[key] = percentages[key] or {}
                             add(percentages[key], scope(content), value)
-                        else add(parsed, key, value) end
+                        else
+                            add(parsed, key, value)
+                            if key == "armor" then
+                                if content:match("^%+") or content:match("%+%s*[%d%.,]+$") then
+                                    add(parsed, "armorBonus", value)
+                                    signedArmor = true
+                                else plainArmor = true end
+                            end
+                        end
                         handled = true; break
                     end
                 end
@@ -928,6 +977,18 @@ local function scan(record, lines)
             end
             local low, high = content:match("^([%d%.,]+)%s*%-%s*([%d%.,]+)%s+damage$")
             if not low then low, high = content:match("^([%d%.,]+)%s*%-%s*([%d%.,]+)%s+dégâts$") end
+            if not low then
+                local first, last, school = content:match("^([%d%.,]+)%s*%-%s*([%d%.,]+)%s+(.+)%s+damage$")
+                if not first then first, last, school = content:match("^([%d%.,]+)%s*%-%s*([%d%.,]+)%s+points de dégâts %((.-)%)$") end
+                if not first then first, last, school = content:match("^([%d%.,]+)%s*%-%s*([%d%.,]+)%s+dégâts de (.+)$") end
+                local knownSchool = school and (schools[school] or school == "physical" or school == "physique" or school == "physiques")
+                if school and not knownSchool then
+                    for _, french in pairs(schools) do
+                        if school == french then knownSchool = true; break end
+                    end
+                end
+                if knownSchool then low, high = first, last end
+            end
             if low then add(weapon, "low", number(low)); add(weapon, "high", number(high)); handled = true end
             local speed = number(content:match("^speed%s+([%d%.,]+)$")) or number(content:match("^vitesse%s+([%d%.,]+)$"))
             if speed then weapon.speed, handled = speed, true end
@@ -1012,6 +1073,19 @@ local function scan(record, lines)
                 if value then percentages.defense = percentages.defense or {}; add(percentages.defense, "generic", value); handled = true end
             end
             if not handled then
+                local value = number(content:match("^your spells pierce ([%d%.,]+) magical resistance$"))
+                if value then add(parsed, "spellPen", value); handled = true end
+            end
+            if not handled then
+                local reason = ignoredTooltipReason(content)
+                if reason then
+                    record.ignoredTooltipStats[#record.ignoredTooltipStats + 1] = {
+                        text = line, index = lineIndex, reason = reason,
+                    }
+                    handled = true
+                end
+            end
+            if not handled then
                 local healing, damage = content:match("^increases healing done by up to ([%d%.,]+) and damage done by up to ([%d%.,]+) for all magical spells and effects$")
                 if healing and damage then
                     add(parsed, "healing", number(healing)); add(parsed, "spellDamage", number(damage)); handled = true
@@ -1055,6 +1129,9 @@ local function scan(record, lines)
         end
     end
     local apiArmor = record.stats.armor
+    -- A signed Armor row is a bonus. Keep the displayed total until the final
+    -- base/bonus split; a bonus-only tooltip must retain the API's total armor.
+    if signedArmor and not plainArmor and apiArmor then parsed.armor = apiArmor end
     for key, value in pairs(parsed) do record.stats[key] = value end
     if parsed.blockValueBonus and parsed.blockValue == nil and record.stats.blockValue == parsed.blockValueBonus then
         record.stats.blockValue = nil
@@ -1119,7 +1196,7 @@ function FW:GetItem(link, profile)
         classID = diagnostic.classID, subclassID = diagnostic.subclassID,
         allowedClasses = diagnostic.allowedClasses, classRestrictionsKnown = diagnostic.classRestrictionsKnown,
         classRestrictionUnknownNames = diagnostic.classRestrictionUnknownNames,
-        unresolvedStats = {}, unrecognizedLines = {}, warnings = {}, partial = false,
+        unresolvedStats = {}, unrecognizedLines = {}, ignoredTooltipStats = {}, warnings = {}, partial = false,
         name = diagnostic.name, parserVersion = PARSER_VERSION,
         diagnostic = self.CopyItemDiagnostic and self:CopyItemDiagnostic(diagnostic) or diagnostic }
     local gear, gearError = self:IsGearItem(record)

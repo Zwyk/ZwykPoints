@@ -75,7 +75,7 @@ local item = assert(FW:GetItem("item:100"))
 equal(item.classID, 4); equal(item.subclassID, 4)
 equal(modernInstantCalls, 0, "complete GetItemInfo metadata needs no instant fallback")
 equal(item.classRestrictionsKnown, true); equal(item.allowedClasses, nil)
-equal(item.parserVersion, 7)
+equal(item.parserVersion, 8)
 equal(FW:GetItem("item:100"), item, "complete metadata remains in the persistent item cache")
 equal(statsCalls, 1); equal(tooltipCalls, 1)
 
