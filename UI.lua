@@ -134,9 +134,16 @@ local function updateUnitHelp(profile)
     UI.percent:SetChecked(not rating)
     UI.rating:SetChecked(rating)
     if rating then
-        UI.unitHelp:SetText("Rating mode: hit, crit, haste, expertise, dodge, parry, block and defense use weights per 1 rating.")
+        UI.unitHelp:SetText("Rating mode: secondary weights apply per 1 rating. Example: crit weight 10 x 7 rating = 70.")
     else
-        UI.unitHelp:SetText("Percent mode: hit, crit, haste, expertise, dodge, parry and block use weights per 1 percentage point (1% = 1). Defense uses skill points.")
+        UI.unitHelp:SetText("Percent mode: weights per 1 percentage point (1% = 1); defense per skill point. Crit weight 10 x 0.5% = 5.")
+    end
+    for _, field in ipairs(UI.fields) do
+        if field.secondary then
+            local unit = rating and "rating" or (field.key == "defense" and "skill" or "%")
+            local name = field.key == "defense" and "Defense" or field.label
+            field.text:SetText(name .. " (" .. unit .. ")")
+        end
     end
 end
 
@@ -650,7 +657,7 @@ local function buildWeightFields()
             groups[groupName] = group
             UI.fieldGroups[#UI.fieldGroups + 1] = group
         end
-        local field = { key = definition.key, label = definition.label or definition.key }
+        local field = { key = definition.key, label = definition.label or definition.key, secondary = definition.secondary }
         field.frame = CreateFrame("Frame", nil, UI.weightContent)
         field.frame:SetHeight(ROW_HEIGHT)
         field.text = label(field.frame, field.label, 11, { 0.85, 0.89, 0.94 })
@@ -1074,6 +1081,20 @@ end
 function FW:ToggleUI()
     if not UI then createUI() end
     if UI.frame:IsShown() then UI.frame:Hide() else UI.frame:Show() end
+end
+
+function FW:InstallCharacterSheetButton()
+    if self.characterSheetButton then return self.characterSheetButton end
+    local slot = _G.CharacterTrinket1Slot
+    if not slot then return end
+    -- The slot supplies the character-tab visibility and position, including
+    -- when Blizzard creates the character UI after this addon has loaded.
+    local launcher = button(slot, "ZV", 42, function() self:ToggleUI() end)
+    launcher:SetHeight(20)
+    launcher:SetPoint("TOPRIGHT", slot, "BOTTOMRIGHT", 0, -6)
+    hint(launcher, "ZwykValues", "Open item value profiles.")
+    self.characterSheetButton = launcher
+    return launcher
 end
 
 function FW:ShowTextDialog(title, text, importMode)

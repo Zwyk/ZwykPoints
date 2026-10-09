@@ -1,5 +1,5 @@
 local _, FW = ...
-local MAX_ITEMS, PARSER_VERSION = 2000, 8
+local MAX_ITEMS, PARSER_VERSION = 2000, 9
 local recentItems, recentCount, recentCache, recentEquipment = {}, 0, nil, nil
 local metadataRetries = setmetatable({}, {__mode="k"})
 local onUseRetries = setmetatable({}, {__mode="k"})
@@ -1015,8 +1015,9 @@ local function scan(record, lines)
             local _, percentCount = content:gsub("%%", "")
             if not handled and pct and percentCount == 1 then
                 local key
-                if content:find("hit") or content:find("toucher") then key = "hit"
-                elseif content:find("critical") or content:find("critique") then key = "crit"
+                -- "Critically hit" describes crit, not ordinary hit chance.
+                if content:find("critical") or content:find("critique") then key = "crit"
+                elseif content:find("hit") or content:find("toucher") then key = "hit"
                 elseif content:find("haste") or content:find("hâte") or content:find("attack speed") or content:find("vitesse d'attaque") then key = "haste"
                 elseif content:find("expertise") then key = "expertise"
                 elseif content:find("dodge") or content:find("esquive") then key = "dodge"

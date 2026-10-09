@@ -87,6 +87,7 @@ function methods:SetFocus() self.focused = true end
 function methods:ClearFocus() self.focused = false end
 function methods:HighlightText() self.highlighted = true end
 function methods:IsShown() return self.shown end
+function methods:IsVisible() return self.shown and (not self.parent or self.parent:IsVisible()) end
 function methods:Show() if not self.shown then self.shown = true self:Fire("OnShow") end end
 function methods:Hide() if self.shown then self.shown = false self:Fire("OnHide") end end
 function methods:SetShown(shown) if shown then self:Show() else self:Hide() end end
@@ -121,6 +122,9 @@ function FW:RefreshUpgradeIndicators() upgradeRefreshes = upgradeRefreshes + 1 e
 function FW:InstallTooltipHooks() end
 assert(loadfile(addonPath .. "/Bootstrap.lua"))("ZwykValues", FW)
 equal(FW.UI, nil, "loading modules creates no editor")
+local beforeCharacterButton = #widgets
+equal(FW:InstallCharacterSheetButton(), nil, "character launcher waits for the native trinket slot")
+equal(#widgets, beforeCharacterButton, "missing character UI creates no launcher or retry frame")
 FW:Initialize()
 equal(FW.UI, nil, "initializing profiles preserves lazy editor construction")
 SlashCmdList.ZWYKVALUES("")
@@ -148,10 +152,83 @@ end
 local function filterControl(group, key)
     return find(function(control) return control.filterGroup == group and control.filterKey == key end)
 end
-local strength, hit = weightBox("Strength"), weightBox("Hit")
+local character = widget("Frame", "CharacterFrame", UIParent)
+local paperDoll = widget("Frame", "PaperDollFrame", character)
+local lastTrinket = widget("Button", "CharacterTrinket1Slot", paperDoll)
+lastTrinket:SetSize(40, 40)
+lastTrinket:SetPoint("TOPRIGHT", paperDoll, "TOPRIGHT", -20, -450)
+local nativeTrinketClick = function() end
+lastTrinket:SetScript("OnClick", nativeTrinketClick)
+local launcher = FW:InstallCharacterSheetButton()
+equal(launcher.parent, lastTrinket, "launcher inherits equipment-tab visibility")
+equal(launcher:GetText(), "ZV", "character launcher keeps a small label")
+equal(launcher:GetWidth(), 42, "character launcher fits below the trinket column")
+equal(launcher:GetHeight(), 20, "character launcher has a compact height")
+local anchor, relative, relativeAnchor, x, y = launcher:GetPoint()
+equal(anchor, "TOPRIGHT", "launcher aligns its right edge with the trinket")
+equal(relative, lastTrinket, "launcher is anchored to the last trinket")
+equal(relativeAnchor, "BOTTOMRIGHT", "launcher appears below the last trinket")
+equal(x, 0, "launcher has no horizontal offset")
+equal(y, -6, "launcher has a small gap under the trinket")
+equal(lastTrinket:GetScript("OnClick"), nativeTrinketClick, "launcher preserves native slot actions")
+equal(launcher:GetScript("OnUpdate"), nil, "character launcher performs no per-frame work")
+local withLauncher = #widgets
+equal(FW:InstallCharacterSheetButton(), launcher, "repeated installation reuses the character launcher")
+equal(#widgets, withLauncher, "repeated installation creates no extra widgets")
+check(launcher:IsVisible(), "launcher is visible on the equipment tab")
+paperDoll:Hide()
+check(not launcher:IsVisible(), "launcher disappears on other character-sheet tabs")
+paperDoll:Show()
+character:Hide()
+check(not launcher:IsVisible(), "closing the character sheet hides its launcher")
+character:Show()
+FW.UI:Hide()
+launcher:Fire("OnClick")
+check(FW.UI:IsShown(), "character launcher opens the profile editor")
+launcher:Fire("OnClick")
+check(not FW.UI:IsShown(), "character launcher can close the profile editor")
+launcher:Fire("OnClick")
+equal(#widgets, withLauncher, "character launcher reuses the existing editor")
+local tooltipTitle, tooltipHelp
+GameTooltip = {
+    SetOwner = function(_, owner) equal(owner, launcher, "launcher owns its explanatory tooltip") end,
+    SetText = function(_, title) tooltipTitle = title end,
+    AddLine = function(_, text) tooltipHelp = text end,
+    Show = function() end,
+    Hide = function() end,
+}
+launcher:Fire("OnEnter")
+equal(tooltipTitle, "ZwykValues", "launcher tooltip identifies the addon")
+equal(tooltipHelp, "Open item value profiles.", "launcher tooltip explains its action")
+launcher:Fire("OnLeave")
+
+local strength, hit = weightBox("Strength"), weightBox("Hit (%)")
 local profile = FW:GetProfiles()[1]
 userText(strength, "2.5")
 userText(hit, "-3")
+local critical = byText("Critical strike (%)", "FontString")
+local defense = byText("Defense (skill)", "FontString")
+for _, text in ipairs({ "Haste (%)", "Expertise (%)", "Dodge (%)", "Parry (%)", "Block chance (%)" }) do
+    check(byText(text, "FontString"), "percent weight label specifies its unit: " .. text)
+end
+byText("Rating", "FontString").parent:Fire("OnClick")
+equal(profile.secondaryUnit, "rating", "rating checkbox saves the explicit profile mode")
+equal(critical:GetText(), "Critical strike (rating)", "crit weight label immediately reflects rating mode")
+equal(defense:GetText(), "Defense (rating)", "defense weight label immediately reflects rating mode")
+equal(hit.parent.children[1]:GetText(), "Hit (rating)", "hit weight label immediately reflects rating mode")
+for _, text in ipairs({ "Haste (rating)", "Expertise (rating)", "Dodge (rating)", "Parry (rating)", "Block chance (rating)" }) do
+    check(byText(text, "FontString"), "rating weight label specifies its unit: " .. text)
+end
+local unitHelp = find(function(control) return control.kind == "FontString" and control:GetText():match("^Rating mode:") end)
+check(unitHelp:GetText():find("10 x 7 rating = 70", 1, true), "rating mode explains the raw-rating crit contribution")
+equal(strength:GetText(), "2.5", "changing units preserves unsaved primary weights")
+equal(hit:GetText(), "-3", "changing units preserves unsaved secondary weights")
+equal(profile.weights.hit, 0, "changing units does not apply draft weights")
+byText("Percent / skill", "FontString").parent:Fire("OnClick")
+equal(profile.secondaryUnit, "percent", "percent checkbox saves the explicit profile mode")
+equal(critical:GetText(), "Critical strike (%)", "crit weight label immediately returns to percent mode")
+equal(defense:GetText(), "Defense (skill)", "defense weight label immediately returns to skill mode")
+check(unitHelp:GetText():find("10 x 0.5% = 5", 1, true), "percent mode explains the percentage-point crit contribution")
 equal(profile.weights.strength, 0, "weights remain drafts before applying")
 click("Item filters")
 local filterScroll = ZwykValuesItemFiltersScroll
@@ -517,6 +594,16 @@ for _, dimensions in ipairs({ {930, 720}, {850, 600} }) do
     within(byText("Apply weights", "Button"), FW.UI, "apply button fits editor")
     within(byText("Clear cache", "Button"), FW.UI, "cache button fits footer")
     check(ZwykValuesStatsScroll:GetHeight() >= 190, "resized editor keeps useful visible weight area")
+    for _, choice in ipairs({ "Rating", "Percent / skill" }) do
+        byText(choice, "FontString").parent:Fire("OnClick")
+        for _, control in ipairs({ critical, defense }) do
+            check(#control:GetText() * control.fontSize * .56 <= control:GetWidth(), "secondary units fit beside their weights at minimum width")
+            local box
+            for _, child in ipairs(control.parent.children) do if child.kind == "EditBox" then box = child end end
+            separate(control, box, "secondary weight labels leave room for the numeric field")
+        end
+        check(math.ceil(#unitHelp:GetText() * unitHelp.fontSize * .56 / unitHelp:GetWidth()) * unitHelp.fontSize <= unitHelp:GetHeight(), "unit explanation fits its available height")
+    end
     within(byText("Item filters", "Button"), FW.UI, "filter button fits minimum editor width")
     within(swatch, FW.UI, "clickable color square fits minimum editor width")
     separate(swatch, byText("Set color", "Button"), "color picker square does not overlap HEX save button")

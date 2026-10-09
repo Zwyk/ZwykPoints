@@ -1,6 +1,6 @@
 local FW = {}
 local counts={initialize=0,hooks=0,refresh=0,invalidate=0,loaded=0,ui=0,
-    upgradeInvalidations=0,indicators=0,recentInvalidations=0}
+    upgradeInvalidations=0,indicators=0,recentInvalidations=0,characterButton=0}
 local messages, equip, hovered = {}, {}, nil
 local events, eventHandler
 DEFAULT_CHAT_FRAME={AddMessage=function(_,message) messages[#messages+1]=message end}
@@ -21,6 +21,7 @@ function FW:Initialize()
     self.DB={cache={items={a={},b={}},scores={a={}}}}
 end
 function FW:InstallTooltipHooks() counts.hooks=counts.hooks+1 end
+function FW:InstallCharacterSheetButton() counts.characterButton=counts.characterButton+1 end
 function FW:RefreshTooltips() counts.refresh=counts.refresh+1 end
 function FW:InvalidateCache() counts.invalidate=counts.invalidate+1 end
 function FW:InvalidateRecentItemReads() counts.recentInvalidations=counts.recentInvalidations+1 end
@@ -56,9 +57,12 @@ local function fire(event,id,success) eventHandler(nil,event,id,success) end
 fire("PLAYER_EQUIPMENT_CHANGED",16)
 assert(counts.refresh==0)
 fire("ADDON_LOADED","OtherAddon")
-assert(counts.initialize==0)
+assert(counts.initialize==0 and counts.characterButton==0)
 fire("ADDON_LOADED","ZwykValues")
 assert(counts.initialize==1 and counts.hooks==1)
+assert(counts.characterButton==1,"Install the character launcher when ZwykValues loads")
+fire("ADDON_LOADED","Blizzard_CharacterUI")
+assert(counts.characterButton==2,"Retry launcher installation when the character UI loads later")
 fire("PLAYER_EQUIPMENT_CHANGED",16)
 assert(FW.equipmentRevision==1 and counts.refresh==1)
 assert(counts.recentInvalidations==1 and counts.upgradeInvalidations==1)

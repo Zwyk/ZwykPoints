@@ -1,4 +1,4 @@
-# ZwykValues 0.1.16
+# ZwykValues 0.1.17
 
 A standalone stat-weight addon written from scratch for WoW Forever. No Pawn code, Pawn dependency, third-party libraries, or online item database is required.
 
@@ -7,7 +7,7 @@ A standalone stat-weight addon written from scratch for WoW Forever. No Pawn cod
 1. Close WoW or return to the character selection screen.
 2. Extract the `ZwykValues` folder into the Forever client's `Interface/AddOns` folder. The resulting path must be `Interface/AddOns/ZwykValues/ZwykValues.toc`.
 3. Enable **ZwykValues** in the AddOns list. If the current beta lists it as out of date, enable **Load out of date AddOns**.
-4. Log in and type `/zv`.
+4. Log in and type `/zv`, or click the small **ZV** button beneath the bottom trinket slot on your character sheet.
 
 For a GitHub download, choose **Code → Download ZIP** in the repository, extract it, rename the unpacked repository folder (for example, `ZwykValues-main`) to `ZwykValues`, and copy that folder into `Interface/AddOns`.
 
@@ -59,6 +59,10 @@ Choose the unit explicitly:
 | `speed`, `rangedSpeed` | Weight per weapon swing second | Same |
 
 Merged melee/ranged/spell hit and crit aliases are counted once. The reader prefers explicit tooltip percentages for percentage profiles and keeps native API rating values separately. It does not apply an assumed rating conversion. If a needed stat or secondary-stat unit is unavailable, the item still shows the subtotal from known values, accompanied by a partial-data warning. Unavailable amounts contribute zero to that subtotal; an actually absent stat also contributes zero. Check the diagnostics before trusting a partial comparison.
+
+The editor labels each secondary weight with its selected unit. A crit weight of 10 means **10 points per 1%** in Percent mode, but **10 points per 1 rating** in Rating mode. For Manascale Treads, 157 armor at 0.05, 7 Strength at 0.2 and 7 Intellect at 0.3 contribute 11.35. Its 0.5% crit contributes 5 in Percent mode (total 16.35); with 7 native crit rating, Rating mode contributes 70 (total 81.35). Changing the unit keeps your numeric weights and recalculates scores; choose the unit those weights were intended to use.
+
+Version 0.1.17 also fixes static wording such as `chance to critically hit with spells`: it counts as critical strike chance and does not add hit chance. Previously parsed item records refresh automatically.
 
 `weaponDamage` is the explicit flat bonus (for example, `+1 Weapon Damage`), not the weapon's average base damage. To value average base damage, use half of the intended average-damage weight for both `lowDamage` and `highDamage`. JSON key compatibility is preserved, but all Sixty Upgrades field semantics have not been independently verified; check the units above when importing existing profiles.
 
@@ -120,7 +124,7 @@ Native Blizzard bags and loot-roll windows are supported. BetterBags 0.5.14 is a
 
 Other third-party bag addons can integrate their buttons explicitly with `ZwykValues:RegisterUpgradeItemButton(button, linkProvider)` and re-register after their own slot updates; `linkProvider(button)` must return the current full item link or nil.
 
-After upgrading to 0.1.16, parser-versioned cache keys automatically refresh item stats, classification and on-use metadata. The report's top-level addon version identifies the exporter; each entry's `parserVersion` and `lastSeen` identify when that issue was collected. Issue exports intentionally preserve historical problems. To collect a fresh report, run `/zv clearissues`, then `/zv clearcache`, hover the affected items again, and run `/zv exportissues`.
+After upgrading to 0.1.17, parser-versioned cache keys automatically refresh item stats, classification and on-use metadata. The report's top-level addon version identifies the exporter; each entry's `parserVersion` and `lastSeen` identify when that issue was collected. Issue exports intentionally preserve historical problems. To collect a fresh report, run `/zv clearissues`, then `/zv clearcache`, hover the affected items again, and run `/zv exportissues`.
 
 ## Debugging unrecognized stats
 

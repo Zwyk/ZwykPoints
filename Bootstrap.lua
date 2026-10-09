@@ -1,6 +1,6 @@
 local addonName, FW = ...
 _G.ZwykValues = FW
-FW.version = "0.1.16"
+FW.version = "0.1.17"
 
 function FW:Print(message)
     local text = "|cff80ccffZwykValues:|r " .. tostring(message)
@@ -91,6 +91,7 @@ eventFrame:SetScript("OnEvent", function(_, event, arg1, success)
             end
             if FW.InstallUpgradeChatHooks then FW:InstallUpgradeChatHooks() end
         end
+        if FW.DB and FW.InstallCharacterSheetButton then FW:InstallCharacterSheetButton() end
     elseif not FW.DB then return
     elseif event == "PLAYER_EQUIPMENT_CHANGED" or event == "UNIT_INVENTORY_CHANGED" then
         if event == "UNIT_INVENTORY_CHANGED" and arg1 ~= "player" then return end
